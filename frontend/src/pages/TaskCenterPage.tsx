@@ -6,6 +6,7 @@ import {
   TaskCenterDetailDrawer,
   TaskCenterHealthBanner,
   TaskCenterHelpSection,
+  TaskCenterMetricsSection,
   TaskCenterProjectTasksSection,
   TaskCenterTasksSection,
 } from "./taskCenter/TaskCenterPageSections";
@@ -34,6 +35,7 @@ export function TaskCenterPage() {
     >
       <TaskCenterHealthBanner {...state.healthBannerProps} />
       <TaskCenterHelpSection {...state.helpSectionProps} />
+      <TaskCenterMetricsSection {...state.metricsSectionProps} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <TaskCenterChangeSetsSection {...state.changeSetsSectionProps} />

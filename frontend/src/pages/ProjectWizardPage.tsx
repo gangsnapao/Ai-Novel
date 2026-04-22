@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { motion, useReducedMotion } from "framer-motion";
-import { CheckCircle2, Circle, CircleSlash2, Wand2 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { CheckCircle2, Circle, CircleSlash2, Eye, EyeOff, Wand2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { GhostwriterIndicator } from "../components/atelier/GhostwriterIndicator";
@@ -16,8 +16,11 @@ import { duration, transition } from "../lib/motion";
 import { UI_COPY } from "../lib/uiCopy";
 import { ApiError, apiJson } from "../services/apiClient";
 import { chapterStore } from "../services/chapterStore";
+import { getCurrentUserId } from "../services/currentUser";
+import { isWizardBarHidden, onWizardBarVisibilityChanged, setWizardBarHidden } from "../services/uiState";
 import { computeWizardProgress, setWizardStepSkipped, type WizardStep, type WizardStepKey } from "../services/wizard";
 import type { ChapterListItem, Character, LLMPreset, LLMProfile, Outline, ProjectSettings } from "../types";
+import { expandOutlineChaptersForSkeleton } from "./outline/outlineSkeletonChapters";
 
 type OutlineGenChapter = { number: number; title: string; beats: string[] };
 type OutlineGenResult = {
@@ -41,6 +44,7 @@ const EMPTY_PROFILES: LLMProfile[] = [];
 
 export function ProjectWizardPage() {
   const { projectId } = useParams();
+  const userId = getCurrentUserId();
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
@@ -51,7 +55,19 @@ export function ProjectWizardPage() {
 
   const [version, setVersion] = useState(0);
   const [autoRunning, setAutoRunning] = useState(false);
+  const [wizardBarHidden, setWizardBarHiddenState] = useState(() => (projectId ? isWizardBarHidden(userId, projectId) : false));
   const chapterListQuery = useChapterMetaList(projectId);
+
+  useEffect(() => {
+    setWizardBarHiddenState(projectId ? isWizardBarHidden(userId, projectId) : false);
+  }, [projectId, userId]);
+
+  useEffect(() => {
+    return onWizardBarVisibilityChanged((detail) => {
+      if (detail.userId !== userId || detail.projectId !== projectId) return;
+      setWizardBarHiddenState(detail.hidden);
+    });
+  }, [projectId, userId]);
 
   const wizardQuery = useProjectData<WizardLoaded>(projectId, async (id) => {
     const [settingsRes, charsRes, outlineRes, presetRes, profilesRes] = await Promise.all([
@@ -119,6 +135,11 @@ export function ProjectWizardPage() {
     el?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
   }, [reduceMotion]);
 
+  const toggleWizardBarVisibility = useCallback(() => {
+    if (!projectId) return;
+    setWizardBarHidden(userId, projectId, !wizardBarHidden);
+  }, [projectId, userId, wizardBarHidden]);
+
   const autoOutlineAndChapters = useCallback(async () => {
     if (!projectId) return;
     if (!llmPreset) {
@@ -154,7 +175,10 @@ export function ProjectWizardPage() {
       });
 
       const outlineMd = outlineGen.data.outline_md ?? "";
-      const genChapters = outlineGen.data.chapters ?? [];
+      const genChapters = expandOutlineChaptersForSkeleton({
+        contentMd: outlineMd,
+        chapters: outlineGen.data.chapters ?? [],
+      });
       if (genChapters.length === 0) {
         toast.toastError("已生成大纲，但未解析出章节结构；请到大纲页手动调整并创建章节。");
         navigate(`/projects/${projectId}/outline`);
@@ -260,6 +284,12 @@ export function ProjectWizardPage() {
             <button className="btn btn-secondary" onClick={() => void reload()} type="button">
               刷新进度
             </button>
+            <button className="btn btn-secondary" onClick={toggleWizardBarVisibility} type="button">
+              <span className="inline-flex items-center gap-2">
+                {wizardBarHidden ? <Eye size={16} /> : <EyeOff size={16} />}
+                {wizardBarHidden ? "显示底部向导" : "隐藏底部向导"}
+              </span>
+            </button>
             <div className="rounded-atelier border border-border bg-canvas px-3 py-2 text-xs text-subtext">
               {nextStep ? `下一步：${nextStep.title}` : "已完成"}
             </div>
@@ -269,6 +299,9 @@ export function ProjectWizardPage() {
         <div className="mt-4">
           <ProgressBar ariaLabel="项目开工向导完成度" value={progress.percent} />
           <div className="mt-2 text-xs text-subtext">完成度：{progress.percent}%</div>
+          <div className="mt-1 text-xs text-subtext">
+            {wizardBarHidden ? "底部向导浮条当前已隐藏，可随时重新显示。" : "底部向导浮条当前显示中，可按需手动隐藏。"}
+          </div>
         </div>
       </section>
 

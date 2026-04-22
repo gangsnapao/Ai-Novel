@@ -1,10 +1,9 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import clsx from "clsx";
 
 import { transition } from "../../lib/motion";
+import { MarkdownPreview, preloadMarkdownPreviewRenderer } from "./MarkdownPreview";
 
 type EditorTab = "edit" | "preview";
 
@@ -68,6 +67,9 @@ export function MarkdownEditor({
     el.scrollTop = Math.min(el.scrollHeight, lastScrollTopRef.current);
   }, [tab, value]);
   const setTab = (next: EditorTab) => {
+    if (next === "preview") {
+      void preloadMarkdownPreviewRenderer();
+    }
     if (onTabChange) onTabChange(next);
     else setInternalTab(next);
   };
@@ -141,9 +143,11 @@ export function MarkdownEditor({
           }}
         />
       ) : (
-        <div className="atelier-content max-w-none px-3 py-4 text-ink">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{value || "_（空）_"}</ReactMarkdown>
-        </div>
+        <MarkdownPreview
+          className="atelier-content max-w-none px-3 py-4 text-ink"
+          content={value}
+          fallback={<div className="atelier-content max-w-none px-3 py-4 text-subtext">加载预览中...</div>}
+        />
       )}
     </div>
   );

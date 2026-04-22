@@ -9,6 +9,16 @@ from typing import Any
 from app.core.errors import AppError
 from app.services.prompting import render_template
 
+_PROMPT_RESOURCE_MOJIBAKE_FIXUPS: dict[str, str] = {
+    "姝ｆ枃浼樺寲": "正文优化",
+    "娑﹁壊": "润色",
+    "榛樿路澶х翰鐢熸垚 v3锛堟帹鑽愶級": "默认·大纲生成 v3（推荐）",
+    "榛樿路绔犺妭鐢熸垚 v3锛堟帹鑽愶級": "默认·章节生成 v3（推荐）",
+    "榛樿路绔犺妭鐢熸垚 v4锛堟帹鑽愶級": "默认·章节生成 v4（推荐）",
+    "榛樿路绔犺妭鍒嗘瀽 v1锛堟帹鑽愶級": "默认·章节分析 v1（推荐）",
+    "榛樿路绔犺妭閲嶅啓 v1锛堟帹鑽愶級": "默认·章节重写 v1（推荐）",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class PromptPresetResourceBlock:
@@ -46,7 +56,8 @@ def _resource_base_dir() -> Path:
 def _ensure_str(value: Any, *, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise AppError(code="PROMPT_RESOURCE_INVALID", message="内置 Prompt 资源无效", status_code=500, details={"field": field})
-    return value
+    text = value.strip()
+    return _PROMPT_RESOURCE_MOJIBAKE_FIXUPS.get(text, text)
 
 
 def _ensure_optional_str(value: Any, *, field: str, max_length: int) -> str | None:
@@ -64,7 +75,7 @@ def _ensure_optional_str(value: Any, *, field: str, max_length: int) -> str | No
             status_code=500,
             details={"field": field, "reason": "max_length", "max_length": max_length},
         )
-    return out
+    return _PROMPT_RESOURCE_MOJIBAKE_FIXUPS.get(out, out)
 
 
 def _ensure_bool(value: Any, *, field: str) -> bool:

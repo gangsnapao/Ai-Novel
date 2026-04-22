@@ -11,12 +11,18 @@ import { ProjectTaskRuntimePanel } from "./ProjectTaskRuntimePanel";
 import { StatusBadge } from "./StatusBadge";
 import { TASK_CENTER_COPY } from "./taskCenterCopy";
 import {
+  formatMetricsLatency,
+  formatMetricsQueueRun,
+  formatMetricsRate,
   formatTaskCenterErrorText,
   type HealthData,
   type MemoryChangeSetSummary,
   type MemoryTaskSummary,
   type ProjectTaskSummary,
+  type TaskCenterMetricsBucket,
+  type TaskCenterMetricsOverview,
   type TaskCenterSelectedItem,
+  type TaskUserVisibleError,
 } from "./taskCenterModels";
 
 function RequestIdRow(props: {
@@ -37,6 +43,28 @@ function RequestIdRow(props: {
       >
         {props.buttonLabel}
       </button>
+    </div>
+  );
+}
+
+function UserVisibleErrorsBlock(props: { errors?: TaskUserVisibleError[] | null }) {
+  const items = (props.errors ?? []).filter((item) => item && (item.title || item.message || item.detail));
+  if (items.length === 0) return null;
+
+  return (
+    <div className="grid gap-2">
+      {items.map((item, index) => (
+        <div key={`${item.code ?? "err"}-${index}`} className="rounded-atelier border border-danger/30 bg-danger/5 p-2">
+          <div className="text-xs font-medium text-danger">{item.title || item.code || "任务失败"}</div>
+          {item.message ? <div className="mt-1 text-xs text-ink">{item.message}</div> : null}
+          {item.detail ? <div className="mt-1 whitespace-pre-wrap text-[11px] text-subtext">{item.detail}</div> : null}
+          {item.request_id ? (
+            <div className="mt-1 text-[11px] text-subtext">
+              request_id: <span className="font-mono">{item.request_id}</span>
+            </div>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -120,6 +148,123 @@ export function TaskCenterHelpSection(props: TaskCenterHelpSectionProps) {
         <div className="text-warning">{UI_COPY.taskCenter.riskHint}</div>
       </div>
     </DebugDetails>
+  );
+}
+
+type MetricsCardProps = {
+  title: string;
+  bucket: TaskCenterMetricsBucket;
+  latencyLabel: string;
+};
+
+function MetricsCard(props: MetricsCardProps) {
+  const topKinds = (props.bucket.kind_breakdown ?? []).slice(0, 4);
+
+  return (
+    <div className="surface p-3">
+      <div className="text-sm text-ink">{props.title}</div>
+      <div className="mt-3 grid gap-2 text-xs text-subtext sm:grid-cols-2">
+        <div>
+          <div>{TASK_CENTER_COPY.metricsMetricTotal}</div>
+          <div className="mt-1 text-sm text-ink">{props.bucket.total}</div>
+        </div>
+        <div>
+          <div>{TASK_CENTER_COPY.metricsMetricQueue}</div>
+          <div className="mt-1 text-sm text-ink">{formatMetricsQueueRun(props.bucket)}</div>
+        </div>
+        <div>
+          <div>{TASK_CENTER_COPY.metricsMetricSuccess}</div>
+          <div className="mt-1 text-sm text-ink">{formatMetricsRate(props.bucket.success_rate)}</div>
+        </div>
+        <div>
+          <div>{props.latencyLabel}</div>
+          <div className="mt-1 text-sm text-ink">{formatMetricsLatency(props.bucket)}</div>
+        </div>
+      </div>
+      {topKinds.length > 0 ? (
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="text-[11px] text-subtext">{TASK_CENTER_COPY.metricsMetricKinds}</div>
+          <div className="mt-2 grid gap-2">
+            {topKinds.map((item) => (
+              <div key={item.kind} className="flex items-center justify-between gap-3 text-xs">
+                <div className="min-w-0 truncate text-ink">{item.kind}</div>
+                <div className="shrink-0 text-subtext">
+                  {item.total} total | {item.failed} failed | {item.running} running
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export type TaskCenterMetricsSectionProps = {
+  loading: boolean;
+  metrics: { data: TaskCenterMetricsOverview; requestId: string } | null;
+  windowHours: number;
+  onWindowHoursChange: (value: number) => void;
+  onCopyRequestId: (requestId: string) => void;
+};
+
+export function TaskCenterMetricsSection(props: TaskCenterMetricsSectionProps) {
+  return (
+    <section className="panel p-4" aria-label={TASK_CENTER_COPY.metricsSectionAria}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm text-ink">{TASK_CENTER_COPY.metricsTitle}</div>
+          <div className="mt-1 text-xs text-subtext">{TASK_CENTER_COPY.metricsHint}</div>
+          {props.metrics?.data.as_of ? (
+            <div className="mt-1 text-[11px] text-subtext">
+              {TASK_CENTER_COPY.metricsUpdatedPrefix} {props.metrics.data.as_of}
+            </div>
+          ) : null}
+          {props.metrics?.requestId ? (
+            <RequestIdRow
+              requestId={props.metrics.requestId}
+              buttonLabel={TASK_CENTER_COPY.metricsRequestIdButton}
+              onCopy={props.onCopyRequestId}
+            />
+          ) : null}
+        </div>
+        <label className="grid gap-1">
+          <span className="text-[11px] text-subtext">{TASK_CENTER_COPY.metricsWindowLabel}</span>
+          <select
+            className="select"
+            aria-label="taskcenter_metrics_window"
+            value={String(props.windowHours)}
+            onChange={(event) => props.onWindowHoursChange(Number(event.target.value) || 24)}
+          >
+            <option value="24">{TASK_CENTER_COPY.metricsWindowOptions["24"]}</option>
+            <option value="72">{TASK_CENTER_COPY.metricsWindowOptions["72"]}</option>
+            <option value="168">{TASK_CENTER_COPY.metricsWindowOptions["168"]}</option>
+          </select>
+        </label>
+      </div>
+
+      {props.loading ? <div className="mt-3 text-sm text-subtext">{TASK_CENTER_COPY.loading}</div> : null}
+
+      {props.metrics ? (
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <MetricsCard
+            title={TASK_CENTER_COPY.metricsCardProjectTasks}
+            bucket={props.metrics.data.project_tasks}
+            latencyLabel={TASK_CENTER_COPY.metricsMetricLatency}
+          />
+          <MetricsCard
+            title={TASK_CENTER_COPY.metricsCardMemoryTasks}
+            bucket={props.metrics.data.memory_tasks}
+            latencyLabel={TASK_CENTER_COPY.metricsMetricLatency}
+          />
+          <MetricsCard
+            title={TASK_CENTER_COPY.metricsCardImports}
+            bucket={props.metrics.data.imports}
+            latencyLabel={TASK_CENTER_COPY.metricsMetricRunOnly}
+          />
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -322,8 +467,11 @@ export function TaskCenterTasksSection(props: TaskCenterTasksSectionProps) {
                   />
                 ) : null}
                 {item.status === "failed" ? (
-                  <div className="mt-1 truncate text-xs text-danger">
-                    {formatTaskCenterErrorText(item.error_type, item.error_message)}
+                  <div className="mt-1 grid gap-2">
+                    <div className="truncate text-xs text-danger">
+                      {formatTaskCenterErrorText(item.error_type, item.error_message)}
+                    </div>
+                    <UserVisibleErrorsBlock errors={item.user_visible_errors} />
                   </div>
                 ) : null}
               </div>
@@ -630,6 +778,7 @@ export function TaskCenterDetailDrawer(props: TaskCenterDetailDrawerProps) {
                 <div className="text-danger">
                   {formatTaskCenterErrorText(props.selected.item.error_type, props.selected.item.error_message)}
                 </div>
+                <UserVisibleErrorsBlock errors={props.selected.item.user_visible_errors} />
                 {extractHowToFix(props.selected.item.error).length > 0 ? (
                   <ul className="list-disc pl-5 text-[11px] text-subtext">
                     {extractHowToFix(props.selected.item.error).map((item, idx) => (

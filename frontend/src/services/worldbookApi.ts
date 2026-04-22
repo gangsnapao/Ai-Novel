@@ -15,6 +15,15 @@ export type ProjectTask = {
   params?: unknown;
   result?: unknown;
   error?: unknown;
+  user_visible_errors?: Array<{
+    title?: string | null;
+    message?: string | null;
+    detail?: string | null;
+    severity?: string | null;
+    code?: string | null;
+    request_id?: string | null;
+    action?: Record<string, unknown> | null;
+  }>;
 };
 
 type PagedResult<T> = { items: T[]; next_before?: string | null };

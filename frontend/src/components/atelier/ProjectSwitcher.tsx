@@ -5,7 +5,7 @@ import { useProjects } from "../../contexts/projects";
 import { UI_COPY } from "../../lib/uiCopy";
 
 export function ProjectSwitcher() {
-  const { projects, loading } = useProjects();
+  const { projects, loading, refresh } = useProjects();
   const { projectId } = useParams();
   const navigate = useNavigate();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -66,7 +66,10 @@ export function ProjectSwitcher() {
           aria-haspopup="listbox"
           aria-expanded={open}
           disabled={loading}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => {
+            if (!open) void refresh();
+            setOpen((v) => !v);
+          }}
         >
           <span className="min-w-0 truncate">{buttonLabel}</span>
           <span className="shrink-0 text-subtext" aria-hidden>

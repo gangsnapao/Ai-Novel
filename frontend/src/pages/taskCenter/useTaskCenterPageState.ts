@@ -30,6 +30,7 @@ import {
   TaskCenterDetailDrawer,
   TaskCenterHealthBanner,
   TaskCenterHelpSection,
+  TaskCenterMetricsSection,
   TaskCenterProjectTasksSection,
   TaskCenterTasksSection,
 } from "./TaskCenterPageSections";
@@ -43,6 +44,7 @@ import {
   type ChangeSetApplyResult,
   type HealthData,
   type MemoryChangeSetSummary,
+  type TaskCenterMetricsOverview,
   type MemoryTaskSummary,
   type PagedResult,
   type ProjectTaskSummary,
@@ -54,6 +56,7 @@ type TaskCenterPageState = {
   onRefreshAll: () => void;
   healthBannerProps: ComponentProps<typeof TaskCenterHealthBanner>;
   helpSectionProps: ComponentProps<typeof TaskCenterHelpSection>;
+  metricsSectionProps: ComponentProps<typeof TaskCenterMetricsSection>;
   changeSetsSectionProps: ComponentProps<typeof TaskCenterChangeSetsSection>;
   tasksSectionProps: ComponentProps<typeof TaskCenterTasksSection>;
   projectTasksSectionProps: ComponentProps<typeof TaskCenterProjectTasksSection>;
@@ -66,6 +69,9 @@ export function useTaskCenterPageState(): TaskCenterPageState {
   const [searchParams] = useSearchParams();
 
   const [health, setHealth] = useState<{ data: HealthData; requestId: string } | null>(null);
+  const [metrics, setMetrics] = useState<{ data: TaskCenterMetricsOverview; requestId: string } | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsWindowHours, setMetricsWindowHours] = useState(24);
   const [changeSetStatus, setChangeSetStatus] = useState<string>("all");
   const [taskStatus, setTaskStatus] = useState<string>("all");
   const [projectTaskStatus, setProjectTaskStatus] = useState<string>("all");
@@ -95,6 +101,25 @@ export function useTaskCenterPageState(): TaskCenterPageState {
       cancelled = true;
     };
   }, []);
+
+  const refreshMetrics = useCallback(async () => {
+    if (!projectId) return;
+    setMetricsLoading(true);
+    try {
+      const response = await apiJson<TaskCenterMetricsOverview>(
+        `/api/projects/${projectId}/metrics/overview?window_hours=${metricsWindowHours}`,
+      );
+      setMetrics({ data: response.data, requestId: response.request_id });
+    } catch {
+      setMetrics(null);
+    } finally {
+      setMetricsLoading(false);
+    }
+  }, [metricsWindowHours, projectId]);
+
+  useEffect(() => {
+    void refreshMetrics();
+  }, [refreshMetrics]);
 
   const loadChangeSets = useCallback(
     async (id: string): Promise<PagedResult<MemoryChangeSetSummary>> => {
@@ -171,10 +196,11 @@ export function useTaskCenterPageState(): TaskCenterPageState {
   const detailHeading = useMemo(() => getTaskCenterDetailHeading(selected), [selected]);
 
   const refreshAll = useCallback(() => {
+    void refreshMetrics();
     void refreshChangeSets();
     void refreshTasks();
     void refreshProjectTasks();
-  }, [refreshChangeSets, refreshProjectTasks, refreshTasks]);
+  }, [refreshChangeSets, refreshMetrics, refreshProjectTasks, refreshTasks]);
 
   const copyRequestId = useCallback(async (requestId: string) => {
     await copyText(requestId, { title: TASK_CENTER_COPY.requestIdCopyTitle });
@@ -251,6 +277,7 @@ export function useTaskCenterPageState(): TaskCenterPageState {
       }
       projectTaskRefreshTimerRef.current = window.setTimeout(() => {
         projectTaskRefreshTimerRef.current = null;
+        void refreshMetrics();
         void refreshProjectTasks();
         if (taskId && selected?.kind === "project_task" && selected.item.id === taskId) {
           void refreshSelectedProjectTask(taskId, { silent: true });
@@ -258,7 +285,7 @@ export function useTaskCenterPageState(): TaskCenterPageState {
         }
       }, 120);
     },
-    [refreshProjectTasks, refreshSelectedProjectTask, refreshSelectedProjectTaskRuntime, selected],
+    [refreshMetrics, refreshProjectTasks, refreshSelectedProjectTask, refreshSelectedProjectTaskRuntime, selected],
   );
 
   useEffect(() => {
@@ -290,6 +317,7 @@ export function useTaskCenterPageState(): TaskCenterPageState {
     if (!projectId) return;
     if (projectTaskEvents.status === "open") return;
     const intervalId = window.setInterval(() => {
+      void refreshMetrics();
       void refreshProjectTasks();
       if (selected?.kind === "project_task") {
         void refreshSelectedProjectTask(selected.item.id, { silent: true });
@@ -300,6 +328,7 @@ export function useTaskCenterPageState(): TaskCenterPageState {
   }, [
     projectId,
     projectTaskEvents.status,
+    refreshMetrics,
     refreshProjectTasks,
     refreshSelectedProjectTask,
     refreshSelectedProjectTaskRuntime,
@@ -593,6 +622,13 @@ export function useTaskCenterPageState(): TaskCenterPageState {
     },
     helpSectionProps: {
       projectId,
+    },
+    metricsSectionProps: {
+      loading: metricsLoading,
+      metrics,
+      windowHours: metricsWindowHours,
+      onWindowHoursChange: setMetricsWindowHours,
+      onCopyRequestId: (requestId) => void copyRequestId(requestId),
     },
     changeSetsSectionProps: {
       loading: changeSetsQuery.loading,

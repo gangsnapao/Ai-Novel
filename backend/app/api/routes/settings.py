@@ -52,7 +52,8 @@ def _vector_effective_disabled_reason(
             "azure_deployment": azure_deployment,
             "azure_api_version": azure_api_version,
             "sentence_transformers_model": sentence_transformers_model,
-        }
+        },
+        use_settings_fallback=False,
     )
     enabled, disabled_reason = embedding_enabled_reason(cfg)
     return None if enabled else disabled_reason

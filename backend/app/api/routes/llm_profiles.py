@@ -17,6 +17,7 @@ from app.services.llm_contract_service import (
     normalize_base_url_for_provider as contract_normalize_base_url_for_provider,
     normalize_max_tokens_for_provider,
     normalize_provider_model,
+    validate_provider_base_url_compatibility,
 )
 from app.services.llm_profile_template import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -108,6 +109,7 @@ def list_profiles(request: Request, db: DbDep, user_id: UserIdDep) -> dict:
 def create_profile(request: Request, db: DbDep, user_id: UserIdDep, body: LLMProfileCreate) -> dict:
     request_id = request.state.request_id
     provider, model = normalize_provider_model(str(body.provider or "").strip(), str(body.model or "").strip())
+    validate_provider_base_url_compatibility(provider, body.base_url)
     row = LLMProfile(
         id=new_id(),
         owner_user_id=user_id,
@@ -148,6 +150,7 @@ def update_profile(request: Request, db: DbDep, user_id: UserIdDep, profile_id: 
     model_input = str(body.model or row.model).strip()
     provider, model = normalize_provider_model(provider_input, model_input)
     base_url = body.base_url if "base_url" in body.model_fields_set else row.base_url
+    validate_provider_base_url_compatibility(provider, base_url)
 
     if body.name is not None:
         row.name = body.name

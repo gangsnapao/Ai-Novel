@@ -42,88 +42,58 @@
 
 ### 多用户与工程化
 
-- 账号体系：本地注册/登录、管理员用户管理、可选 LinuxDo OIDC 登录
-- 后台任务：Docker Compose 默认启用 Redis + `rq_worker`（任务中心可查看/重试/取消）
+- 账号体系：本地注册/登录、管理员用户管理
+- 后台任务：本地开发默认使用 `inline` 队列
 - 可观测性：后端 JSON 日志 + `X-Request-Id`；关键操作可追踪
 
-## 快速部署（Docker Compose，推荐）
+## 本地启动（SQLite，唯一支持方式）
 
-前置：安装 Docker Engine + Docker Compose v2。
-
-1) 准备环境变量（不要提交到 git）：
+推荐直接使用项目根目录启动脚本：
 
 ```bash
-cp .env.docker.example .env.docker
-# 至少修改 AUTH_ADMIN_PASSWORD（>= 8 位）
+./start-ai-novel.command
 ```
 
-2) 启动：
+启动后访问：
+
+- 前端：`http://127.0.0.1:5174`
+- 后端：`http://127.0.0.1:8000`
+
+## 本地开发
+
+### 后端
 
 ```bash
-docker compose --env-file .env.docker up -d --build
-docker compose ps
-```
-
-3) 访问：
-
-- 前端：`http://localhost:5173`
-- 后端：`http://localhost:8000`（API 前缀 `/api`；前端容器会反代 `/api/`）
-
-生产环境建议（不对外暴露 Postgres/Redis 端口）：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.docker up -d --build
-```
-
-常用命令：
-
-```bash
-docker compose logs -f backend
-docker compose logs -f rq_worker
-docker compose down            # 保留数据卷
-docker compose down -v         # 删除数据卷（不可恢复）
-```
-
-数据持久化卷：
-
-- `postgres_data`：Postgres 数据
-- `app_data`：应用数据（例如 `/data/chroma`、`/data/secrets`）
-
-## 本地开发（可选）
-
-### 后端（SQLite）
-
-```powershell
 cd backend
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-copy .env.example .env
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --workers 1 --port 8000
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+./.venv/bin/python -m uvicorn app.main:app --reload --workers 1 --host 127.0.0.1 --port 8000
 ```
 
 说明：
 
-- SQLite 模式仅支持单 worker；需要多 worker/后台任务队列时，使用 Docker Compose（Postgres + Redis + `rq_worker`）。
-- SQLite 模式下避免长事务（尤其是 LLM 调用期间不要持有 DB 事务）。
+- 本项目当前以 SQLite 本地库 `backend/ainovel.db` 为唯一主库。
+- 本地模式使用单 worker 和 `inline` 队列。
+- SQLite 模式下避免长事务，尤其不要在 LLM 调用期间持有 DB 事务。
 
 ### 前端
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5174
 ```
 
 ## 配置提示（最小）
 
 - 管理员：由 `AUTH_ADMIN_USER_ID` / `AUTH_ADMIN_PASSWORD` 在“首次初始化空数据库”时写入；后续修改 env 不会自动重置既有密码（需要新数据卷才会重新初始化）。
 - LLM：在页面「Prompts」里填写 provider / base_url / api_key；服务端日志会对 key 做脱敏。
-- 外部 Postgres：需支持 `pgvector`（`CREATE EXTENSION vector`）；否则可将 `VECTOR_BACKEND=chroma`。
-- 可选 OIDC：`LINUXDO_OIDC_*`（见 `docker-compose.yml` 与 `.env.docker.example`）。
+- 外部数据库不是默认方案；当前默认数据源是 SQLite。
 
 ## 安全
 
-- 上线前务必修改默认密码，并确保 `.env.docker` 不入库。
+- 上线前务必修改默认密码。
 - 生产环境请使用 `APP_ENV=prod`，并关闭/清空 `AUTH_DEV_FALLBACK_USER_ID`（避免 dev_fallback 带来的鉴权绕过风险）。
 
 ## 开源许可证

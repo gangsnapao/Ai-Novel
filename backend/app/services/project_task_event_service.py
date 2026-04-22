@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
@@ -13,19 +12,12 @@ from app.core.secrets import redact_api_keys
 from app.db.utils import utc_now
 from app.models.project_task import ProjectTask
 from app.models.project_task_event import ProjectTaskEvent
-
-
-def _compact_json_dumps(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
-def _compact_json_loads(value: str | None) -> Any | None:
-    if value is None:
-        return None
-    try:
-        return json.loads(value)
-    except Exception:
-        return None
+from app.services.project_task_error_utils import (
+    compact_json_dumps,
+    compact_json_loads,
+    derive_user_visible_errors,
+    project_task_error_fields,
+)
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -34,17 +26,26 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat().replace("+00:00", "Z")
 
 
+def _compact_json_loads(value: str | None) -> Any | None:
+    return compact_json_loads(value)
+
+
 def _task_error_fields(task: ProjectTask) -> tuple[str | None, str | None]:
-    value = _compact_json_loads(task.error_json) if task.error_json else None
-    if not isinstance(value, dict):
-        return None, None
-    error_type = str(value.get("error_type") or "").strip() or None
-    error_message = str(value.get("message") or "").strip() or None
+    error_type, error_message, _, _ = project_task_error_fields(
+        task.error_json,
+        getattr(task, "user_visible_errors_json", None),
+    )
     return error_type, error_message
 
 
 def project_task_event_task_payload(task: ProjectTask) -> dict[str, Any]:
     error_type, error_message = _task_error_fields(task)
+    _, _, user_visible_errors, _ = project_task_error_fields(
+        task.error_json,
+        getattr(task, "user_visible_errors_json", None),
+    )
+    if str(getattr(task, "status", "") or "").strip().lower() not in {"failed", "canceled"} and not task.error_json:
+        user_visible_errors = []
     return {
         "id": str(task.id),
         "project_id": str(task.project_id),
@@ -55,6 +56,7 @@ def project_task_event_task_payload(task: ProjectTask) -> dict[str, Any]:
         "attempt": int(getattr(task, "attempt", 0) or 0),
         "error_type": error_type,
         "error_message": error_message,
+        "user_visible_errors": user_visible_errors,
         "timings": {
             "created_at": _iso(task.created_at),
             "started_at": _iso(task.started_at),
@@ -83,7 +85,7 @@ def append_project_task_event(
         task_id=str(task.id),
         kind=str(task.kind),
         event_type=str(event_type),
-        payload_json=_compact_json_dumps(body) if body else None,
+        payload_json=compact_json_dumps(body) if body else None,
     )
     db.add(event)
     db.flush()
@@ -97,6 +99,7 @@ def reset_project_task_to_queued(*, task: ProjectTask, increment_retry_count: bo
     task.finished_at = None
     task.result_json = None
     task.error_json = None
+    task.user_visible_errors_json = None
     task.updated_at = utc_now()
     if not increment_retry_count:
         return
@@ -104,7 +107,7 @@ def reset_project_task_to_queued(*, task: ProjectTask, increment_retry_count: bo
         value = _compact_json_loads(task.params_json) if task.params_json else {}
         if isinstance(value, dict):
             value["retry_count"] = int(value.get("retry_count") or 0) + 1
-            task.params_json = _compact_json_dumps(value)
+            task.params_json = compact_json_dumps(value)
     except Exception:
         return
 
@@ -136,7 +139,8 @@ def mark_project_task_enqueue_failed(
     else:
         error_payload = {"error_type": type(exc).__name__, "message": safe_message[:400]}
 
-    task.error_json = _compact_json_dumps(error_payload)
+    task.error_json = compact_json_dumps(error_payload)
+    task.user_visible_errors_json = compact_json_dumps(derive_user_visible_errors(error_payload))
     append_project_task_event(
         db,
         task=task,

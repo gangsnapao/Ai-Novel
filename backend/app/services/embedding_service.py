@@ -91,24 +91,34 @@ class EmbeddingConfig(BaseModel):
         return self
 
 
-def resolve_embedding_config(embedding: dict[str, Any] | None = None) -> EmbeddingConfig:
-    provider = str((embedding or {}).get("provider") or getattr(settings, "vector_embedding_provider", "") or "").strip()
+def resolve_embedding_config(
+    embedding: dict[str, Any] | None = None,
+    *,
+    use_settings_fallback: bool = True,
+) -> EmbeddingConfig:
+    provider = str((embedding or {}).get("provider") or (getattr(settings, "vector_embedding_provider", "") if use_settings_fallback else "") or "").strip()
     provider = provider or "openai_compatible"
 
-    base_url = (embedding or {}).get("base_url") or settings.vector_embedding_base_url
-    model = (embedding or {}).get("model") or settings.vector_embedding_model
-    api_key = (embedding or {}).get("api_key") or settings.vector_embedding_api_key
+    base_url = (embedding or {}).get("base_url") or (settings.vector_embedding_base_url if use_settings_fallback else None)
+    model = (embedding or {}).get("model") or (settings.vector_embedding_model if use_settings_fallback else None)
+    api_key = (embedding or {}).get("api_key") or (settings.vector_embedding_api_key if use_settings_fallback else None)
 
-    azure_deployment = (embedding or {}).get("azure_deployment") or getattr(settings, "vector_embedding_azure_deployment", None)
-    azure_api_version = (embedding or {}).get("azure_api_version") or getattr(settings, "vector_embedding_azure_api_version", None)
+    azure_deployment = (embedding or {}).get("azure_deployment") or (
+        getattr(settings, "vector_embedding_azure_deployment", None) if use_settings_fallback else None
+    )
+    azure_api_version = (embedding or {}).get("azure_api_version") or (
+        getattr(settings, "vector_embedding_azure_api_version", None) if use_settings_fallback else None
+    )
 
-    st_model = (embedding or {}).get("sentence_transformers_model") or getattr(
-        settings, "vector_embedding_sentence_transformers_model", None
+    st_model = (embedding or {}).get("sentence_transformers_model") or (
+        getattr(settings, "vector_embedding_sentence_transformers_model", None) if use_settings_fallback else None
     )
-    st_cache_dir = (embedding or {}).get("sentence_transformers_cache_dir") or getattr(
-        settings, "vector_embedding_sentence_transformers_cache_dir", None
+    st_cache_dir = (embedding or {}).get("sentence_transformers_cache_dir") or (
+        getattr(settings, "vector_embedding_sentence_transformers_cache_dir", None) if use_settings_fallback else None
     )
-    st_device = (embedding or {}).get("sentence_transformers_device") or getattr(settings, "vector_embedding_sentence_transformers_device", None)
+    st_device = (embedding or {}).get("sentence_transformers_device") or (
+        getattr(settings, "vector_embedding_sentence_transformers_device", None) if use_settings_fallback else None
+    )
 
     timeout_seconds = (embedding or {}).get("timeout_seconds")
 
@@ -171,7 +181,7 @@ def embedding_enabled_reason(config: EmbeddingConfig) -> tuple[bool, str | None]
 
 
 def embed_texts(texts: list[str], *, embedding: dict[str, Any] | None = None) -> dict[str, Any]:
-    config = resolve_embedding_config(embedding)
+    config = resolve_embedding_config(embedding, use_settings_fallback=embedding is None)
     enabled, disabled_reason = embedding_enabled_reason(config)
     if not enabled:
         return {

@@ -97,6 +97,14 @@ export interface Character {
   name: string;
   role?: string | null;
   profile?: string | null;
+  profile_version?: number;
+  profile_history?: Array<{
+    version?: number | null;
+    profile: string;
+    captured_at?: string | null;
+  }>;
+  arc_stages?: string[];
+  voice_samples?: string[];
   notes?: string | null;
   updated_at: string;
 }

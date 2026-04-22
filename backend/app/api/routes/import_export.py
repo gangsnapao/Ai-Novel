@@ -11,6 +11,7 @@ from app.core.errors import AppError, ok_payload
 from app.db.session import SessionLocal
 from app.db.utils import new_id
 from app.models.project_source_document import ProjectSourceDocument, ProjectSourceDocumentChunk
+from app.services.import_ai_enrichment_service import enrich_import_document_and_apply
 from app.services.import_export_service import retry_import_task
 from app.services.task_queue import get_task_queue
 from app.services.vector_kb_service import create_kb as create_vector_kb
@@ -51,6 +52,14 @@ class ImportCreateRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     content_text: str = Field(min_length=1, max_length=5_000_000)
     content_type: str | None = Field(default=None, max_length=32)
+
+
+class ImportOneClickApplyRequest(BaseModel):
+    requirements: str | None = Field(default=None, max_length=8000)
+    apply_worldbook: bool = True
+    apply_story_memory: bool = True
+    apply_characters: bool = True
+    apply_graph: bool = True
 
 
 @router.get("/projects/{project_id}/imports")
@@ -145,6 +154,49 @@ def get_import(request: Request, db: DbDep, user_id: UserIdDep, project_id: str,
             "story_memory_proposal": _safe_json(row.story_memory_proposal_json, {}),
         },
     )
+
+
+@router.post("/projects/{project_id}/imports/{document_id}/one_click_apply")
+def one_click_apply_import(
+    request: Request,
+    db: DbDep,
+    user_id: UserIdDep,
+    project_id: str,
+    document_id: str,
+    body: ImportOneClickApplyRequest,
+) -> dict:
+    request_id = request.state.request_id
+    require_project_editor(db, project_id=project_id, user_id=user_id)
+
+    if not any((body.apply_worldbook, body.apply_story_memory, body.apply_characters, body.apply_graph)):
+        raise AppError.validation(message="请至少选择一种写入目标", details={"reason": "no_apply_targets"})
+
+    result = enrich_import_document_and_apply(
+        db=db,
+        project_id=project_id,
+        document_id=document_id,
+        actor_user_id=user_id,
+        request_id=request_id,
+        import_requirements=(str(body.requirements or "").strip() or None),
+        apply_worldbook=bool(body.apply_worldbook),
+        apply_story_memory=bool(body.apply_story_memory),
+        apply_characters=bool(body.apply_characters),
+        apply_graph=bool(body.apply_graph),
+    )
+    if bool(result.get("ok")):
+        return ok_payload(request_id=request_id, data=result)
+
+    reason = str(result.get("reason") or "").strip()
+    if reason in {"project_not_found", "document_not_found"}:
+        raise AppError.not_found(details=result)
+    if reason == "document_not_ready":
+        raise AppError.conflict(message="导入文档尚未处理完成", details=result)
+    if reason == "llm_preset_missing":
+        raise AppError.validation(message="请先在 Prompts 页面配置用于导入整理的 LLM", details=result)
+    if reason == "llm_call_failed":
+        raise AppError(code="IMPORT_LLM_FAILED", message="一键导入整理调用 LLM 失败", status_code=502, details=result)
+
+    raise AppError(code="IMPORT_ONE_CLICK_FAILED", message="一键导入整理失败", status_code=400, details=result)
 
 
 @router.get("/projects/{project_id}/imports/{document_id}/chunks")

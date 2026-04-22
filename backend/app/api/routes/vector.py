@@ -178,7 +178,7 @@ def dry_run_vector_embeddings(request: Request, user_id: UserIdDep, project_id: 
     cfg = resolve_embedding_config(embedding)
 
     start = time.perf_counter()
-    out = embed_texts([text], embedding=embedding)
+    out = embed_texts([text], embedding=cfg.model_dump(exclude_none=True))
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
     vectors = out.get("vectors") if isinstance(out.get("vectors"), list) else []

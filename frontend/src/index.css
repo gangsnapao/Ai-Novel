@@ -54,8 +54,10 @@
     --theme-font-ui: "Inter", "Geist Sans", ui-sans-serif, system-ui, sans-serif;
     --theme-font-content: "Merriweather", "Source Serif 4", ui-serif, serif;
     --theme-font-mono:
-      "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-      "Courier New", monospace;
+      "JetBrains Mono", "Sarasa Mono SC", "Sarasa Mono Slab SC", "LXGW WenKai Mono", "Noto Sans Mono CJK SC",
+      "Fira Code", SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "PingFang SC", "Hiragino Sans GB",
+      "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", "Liberation Mono",
+      "Courier New", ui-monospace, monospace;
     --theme-radius: 12px;
   }
 

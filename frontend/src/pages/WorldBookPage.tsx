@@ -1,5 +1,6 @@
 import {
   WorldBookAutoUpdateSection,
+  WorldBookAiImportDrawer,
   WorldBookEditorDrawer,
   WorldBookEntriesSection,
   WorldBookImportDrawer,
@@ -24,6 +25,7 @@ export function WorldBookPage() {
       </div>
 
       <WorldBookImportDrawer {...state.importDrawerProps} />
+      <WorldBookAiImportDrawer {...state.aiImportDrawerProps} />
       <WorldBookEditorDrawer {...state.editorDrawerProps} />
     </div>
   );

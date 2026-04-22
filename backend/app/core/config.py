@@ -161,7 +161,6 @@ class Settings(BaseSettings):
     fractal_long_retrieval_hits: int = 3
 
     model_config = SettingsConfigDict(
-        env_file=str(_backend_dir() / ".env"),
         env_prefix="",
         extra="ignore",
         case_sensitive=False,
@@ -790,8 +789,6 @@ class Settings(BaseSettings):
     def is_sqlite(self) -> bool:
         return self.database_url.strip().startswith("sqlite")
 
-
-settings = Settings()
-
+settings = Settings(_env_file=str(_backend_dir() / ".env"))
 
 

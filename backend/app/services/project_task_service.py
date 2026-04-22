@@ -15,6 +15,7 @@ from app.core.secrets import redact_api_keys
 from app.db.session import SessionLocal
 from app.db.utils import new_id, utc_now
 from app.models.project_task import ProjectTask
+from app.services.project_task_error_utils import compact_json_loads, project_task_error_fields
 from app.services.project_task_event_service import (
     append_project_task_event,
     mark_project_task_enqueue_failed,
@@ -34,12 +35,7 @@ def _compact_json_dumps(value: Any) -> str:
 
 
 def _compact_json_loads(value: str | None) -> Any | None:
-    if value is None:
-        return None
-    try:
-        return json.loads(value)
-    except Exception:
-        return None
+    return compact_json_loads(value)
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -71,16 +67,20 @@ def _task_status_to_public(status: str) -> str:
 
 
 def _task_error_fields(task: ProjectTask) -> tuple[str | None, str | None]:
-    value = _compact_json_loads(task.error_json) if task.error_json else None
-    if not isinstance(value, dict):
-        return None, None
-    error_type = str(value.get("error_type") or "").strip() or None
-    error_message = str(value.get("message") or "").strip() or None
+    error_type, error_message, _, _ = project_task_error_fields(
+        task.error_json,
+        getattr(task, "user_visible_errors_json", None),
+    )
     return error_type, error_message
 
 
 def project_task_to_dict(*, task: ProjectTask, include_payloads: bool) -> dict[str, Any]:
-    error_type, error_message = _task_error_fields(task)
+    error_type, error_message, user_visible_errors, parsed_error = project_task_error_fields(
+        task.error_json,
+        getattr(task, "user_visible_errors_json", None),
+    )
+    if str(getattr(task, "status", "") or "").strip().lower() not in {"failed", "canceled"} and parsed_error is None:
+        user_visible_errors = []
 
     data: dict[str, Any] = {
         "id": str(task.id),
@@ -92,6 +92,7 @@ def project_task_to_dict(*, task: ProjectTask, include_payloads: bool) -> dict[s
         "attempt": int(getattr(task, "attempt", 0) or 0),
         "error_type": error_type,
         "error_message": error_message,
+        "user_visible_errors": user_visible_errors,
         "timings": {
             "created_at": _iso(task.created_at),
             "started_at": _iso(task.started_at),
@@ -104,7 +105,7 @@ def project_task_to_dict(*, task: ProjectTask, include_payloads: bool) -> dict[s
     if include_payloads:
         params = _compact_json_loads(task.params_json) if task.params_json else None
         result = _compact_json_loads(task.result_json) if task.result_json else None
-        err = _compact_json_loads(task.error_json) if task.error_json else None
+        err = parsed_error
         data["params"] = redact_api_keys(params) if params is not None else None
         data["result"] = redact_api_keys(result) if result is not None else None
         data["error"] = redact_api_keys(err) if err is not None else None

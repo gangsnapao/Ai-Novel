@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.deps import (
@@ -30,13 +31,31 @@ from app.schemas.worldbook import (
     WorldBookImportAllRequest,
     WorldBookPreviewTriggerRequest,
 )
+from app.schemas.worldbook_auto_update import WorldbookAutoUpdateOpV1
+from app.services.ai_one_click_import_service import analyze_worldbook_import_text
 from app.services.memory_query_service import normalize_query_text, parse_query_preprocessing_config
 from app.services.project_task_service import schedule_worldbook_auto_update_task
 from app.services.search_index_service import schedule_search_rebuild_task
 from app.services.vector_rag_service import schedule_vector_rebuild_task
+from app.services.worldbook_auto_update_service import apply_worldbook_auto_update_ops
 from app.services.worldbook_service import preview_worldbook_trigger
 
 router = APIRouter()
+
+
+class WorldbookAiImportAnalyzeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200000)
+
+
+class WorldbookAiImportPreview(BaseModel):
+    schema_version: str = Field(default="worldbook_auto_update_v1", max_length=64)
+    title: str | None = Field(default=None, max_length=255)
+    summary_md: str | None = None
+    ops: list[WorldbookAutoUpdateOpV1] = Field(default_factory=list, max_length=400)
+
+
+class WorldbookAiImportApplyRequest(BaseModel):
+    preview: WorldbookAiImportPreview
 
 
 def _mark_vector_index_dirty(db: DbDep, *, project_id: str) -> None:
@@ -107,6 +126,51 @@ def list_worldbook_entries(request: Request, db: DbDep, user_id: UserIdDep, proj
         .all()
     )
     return ok_payload(request_id=request_id, data={"worldbook_entries": [_to_out(r) for r in rows]})
+
+
+@router.post("/projects/{project_id}/worldbook_entries/ai_import/analyze")
+def analyze_worldbook_ai_import(
+    request: Request,
+    db: DbDep,
+    user_id: UserIdDep,
+    project_id: str,
+    body: WorldbookAiImportAnalyzeRequest,
+) -> dict:
+    request_id = request.state.request_id
+    require_project_editor(db, project_id=project_id, user_id=user_id)
+
+    result = analyze_worldbook_import_text(
+        db=db,
+        project_id=project_id,
+        actor_user_id=user_id,
+        request_id=request_id,
+        source_text=body.text,
+    )
+    if bool(result.get("ok")):
+        return ok_payload(request_id=request_id, data=result)
+
+    reason = str(result.get("reason") or "").strip()
+    if reason == "project_not_found":
+        raise AppError.not_found(details=result)
+    if reason == "llm_preset_missing":
+        raise AppError.validation(message="请先在 Prompts 页面配置可用模型", details=result)
+    if reason == "llm_call_failed":
+        raise AppError(code="WORLDBOOK_AI_IMPORT_LLM_FAILED", message="世界书 AI 导入分析失败", status_code=502, details=result)
+    raise AppError(code="WORLDBOOK_AI_IMPORT_ANALYZE_FAILED", message="世界书 AI 导入分析失败", status_code=400, details=result)
+
+
+@router.post("/projects/{project_id}/worldbook_entries/ai_import/apply")
+def apply_worldbook_ai_import(
+    request: Request,
+    db: DbDep,
+    user_id: UserIdDep,
+    project_id: str,
+    body: WorldbookAiImportApplyRequest,
+) -> dict:
+    request_id = request.state.request_id
+    require_project_editor(db, project_id=project_id, user_id=user_id)
+    result = apply_worldbook_auto_update_ops(db=db, project_id=project_id, ops=[item.model_dump() for item in body.preview.ops])
+    return ok_payload(request_id=request_id, data=result)
 
 
 @router.post("/projects/{project_id}/worldbook_entries/auto_update")

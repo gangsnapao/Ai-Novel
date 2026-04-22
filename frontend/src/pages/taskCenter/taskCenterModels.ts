@@ -24,6 +24,17 @@ export type MemoryTaskSummary = {
   error_message?: string | null;
   error?: unknown;
   timings?: Record<string, unknown>;
+  user_visible_errors?: TaskUserVisibleError[];
+};
+
+export type TaskUserVisibleError = {
+  title?: string | null;
+  message?: string | null;
+  detail?: string | null;
+  severity?: string | null;
+  code?: string | null;
+  request_id?: string | null;
+  action?: Record<string, unknown> | null;
 };
 
 export type ProjectTaskSummary = {
@@ -39,6 +50,7 @@ export type ProjectTaskSummary = {
   params?: unknown;
   result?: unknown;
   error?: unknown;
+  user_visible_errors?: TaskUserVisibleError[];
 };
 
 export type PagedResult<T> = { items: T[]; next_before?: string | null };
@@ -58,6 +70,34 @@ export type HealthData = {
   rq_queue_name?: string | null;
   redis_error_type?: string | null;
   worker_hint?: string | null;
+};
+
+export type TaskCenterMetricsBucket = {
+  total: number;
+  queued: number;
+  running: number;
+  done: number;
+  failed: number;
+  success_rate?: number | null;
+  avg_queue_ms?: number | null;
+  avg_run_ms?: number | null;
+  kind_breakdown?: Array<{
+    kind: string;
+    total: number;
+    queued: number;
+    running: number;
+    done: number;
+    failed: number;
+  }>;
+};
+
+export type TaskCenterMetricsOverview = {
+  window_hours: number;
+  window_start: string;
+  as_of: string;
+  project_tasks: TaskCenterMetricsBucket;
+  memory_tasks: TaskCenterMetricsBucket;
+  imports: TaskCenterMetricsBucket;
 };
 
 export type TaskCenterSelectedItem =
@@ -123,6 +163,29 @@ function readString(value: unknown, fallback = "-"): string {
 
 export function formatTaskCenterErrorText(errorType?: string | null, errorMessage?: string | null) {
   return `${errorType || TASK_CENTER_COPY.unknownErrorType}: ${errorMessage || TASK_CENTER_COPY.unknownErrorMessage}`;
+}
+
+export function formatMetricsRate(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return TASK_CENTER_COPY.metricsEmptyValue;
+  return `${Math.round(value * 100)}%`;
+}
+
+export function formatMetricsDuration(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return TASK_CENTER_COPY.metricsEmptyValue;
+  if (value < 1000) return `${value}ms`;
+  if (value < 60_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}s`;
+  return `${(value / 60_000).toFixed(1)}m`;
+}
+
+export function formatMetricsQueueRun(bucket: TaskCenterMetricsBucket) {
+  return `${readNumber(bucket.queued)}/${readNumber(bucket.running)}`;
+}
+
+export function formatMetricsLatency(bucket: TaskCenterMetricsBucket) {
+  const queue = formatMetricsDuration(bucket.avg_queue_ms);
+  const run = formatMetricsDuration(bucket.avg_run_ms);
+  if (bucket.avg_queue_ms == null) return run;
+  return `${queue} / ${run}`;
 }
 
 export function formatRuntimeCheckpointSummary(checkpoint: {

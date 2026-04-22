@@ -1,11 +1,16 @@
 import clsx from "clsx";
-import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Circle, CircleSlash2, ListChecks } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Circle, CircleSlash2, EyeOff, ListChecks } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ProgressBar } from "../ui/ProgressBar";
 import { getCurrentUserId } from "../../services/currentUser";
-import { wizardBarCollapsedStorageKey } from "../../services/uiState";
+import {
+  isWizardBarHidden,
+  onWizardBarVisibilityChanged,
+  setWizardBarHidden,
+  wizardBarCollapsedStorageKey,
+} from "../../services/uiState";
 import type { WizardProgress, WizardStepKey } from "../../services/wizard";
 
 export type WizardPrimaryAction = {
@@ -24,15 +29,6 @@ export function WizardNextBar(props: {
   onSave?: () => Promise<boolean>;
   primaryAction?: WizardPrimaryAction;
 }) {
-  const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
-  const collapsedStorageKey = wizardBarCollapsedStorageKey(getCurrentUserId());
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    const raw = localStorage.getItem(collapsedStorageKey);
-    if (!raw) return true;
-    return raw === "1";
-  });
-
   const {
     projectId,
     currentStep,
@@ -43,6 +39,28 @@ export function WizardNextBar(props: {
     onSave,
     primaryAction,
   } = props;
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const userId = getCurrentUserId();
+  const collapsedStorageKey = wizardBarCollapsedStorageKey(userId);
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const raw = window.localStorage.getItem(collapsedStorageKey);
+    if (!raw) return true;
+    return raw === "1";
+  });
+  const [hidden, setHidden] = useState<boolean>(() => (projectId ? isWizardBarHidden(userId, projectId) : false));
+
+  useEffect(() => {
+    setHidden(projectId ? isWizardBarHidden(userId, projectId) : false);
+  }, [projectId, userId]);
+
+  useEffect(() => {
+    return onWizardBarVisibilityChanged((detail) => {
+      if (detail.userId !== userId || detail.projectId !== projectId) return;
+      setHidden(detail.hidden);
+    });
+  }, [projectId, userId]);
 
   const current = useMemo(
     () => progress.steps.find((s) => s.key === currentStep) ?? null,
@@ -128,11 +146,16 @@ export function WizardNextBar(props: {
     };
   }, [current, currentStep, dirty, goto, next, onSave, previewStep, primaryAction, saving]);
 
-  if (!projectId) return null;
+  if (!projectId || hidden) return null;
 
   const setCollapsedPersist = (value: boolean) => {
     setCollapsed(value);
-    localStorage.setItem(collapsedStorageKey, value ? "1" : "0");
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(collapsedStorageKey, value ? "1" : "0");
+  };
+
+  const hideWizardBar = () => {
+    setWizardBarHidden(userId, projectId, true);
   };
 
   const CollapsedIcon = collapsed ? ChevronUp : ChevronDown;
@@ -160,18 +183,26 @@ export function WizardNextBar(props: {
             </button>
 
             {collapsed ? (
-              <button
-                className="btn btn-primary h-9 ml-2"
-                disabled={Boolean(primary.disabled) || loading || busy}
-                onClick={() => void run(primary.onClick)}
-                type="button"
-                title={loading ? "加载中..." : primary.label}
-              >
-                <span className="inline-flex max-w-[240px] items-center gap-2 truncate">
-                  {loading ? "加载中..." : primary.label}
-                  <ArrowRight size={16} />
-                </span>
-              </button>
+              <>
+                <button
+                  className="btn btn-primary h-9 ml-2"
+                  disabled={Boolean(primary.disabled) || loading || busy}
+                  onClick={() => void run(primary.onClick)}
+                  type="button"
+                  title={loading ? "加载中..." : primary.label}
+                >
+                  <span className="inline-flex max-w-[240px] items-center gap-2 truncate">
+                    {loading ? "加载中..." : primary.label}
+                    <ArrowRight size={16} />
+                  </span>
+                </button>
+                <button className="btn btn-secondary h-9 ml-2" onClick={hideWizardBar} type="button">
+                  <span className="inline-flex items-center gap-2">
+                    <EyeOff size={16} />
+                    隐藏向导
+                  </span>
+                </button>
+              </>
             ) : null}
 
             <div className="mt-2 rounded-atelier border border-border bg-surface/90 p-4 shadow-sm backdrop-blur">
@@ -228,6 +259,13 @@ export function WizardNextBar(props: {
                 </div>
 
                 <div className="flex shrink-0 flex-wrap gap-2">
+                  <button className="btn btn-secondary" onClick={hideWizardBar} type="button">
+                    <span className="inline-flex items-center gap-2">
+                      <EyeOff size={16} />
+                      隐藏向导
+                    </span>
+                  </button>
+
                   <button
                     className="btn btn-secondary"
                     disabled={!wizardHref || loading || busy}

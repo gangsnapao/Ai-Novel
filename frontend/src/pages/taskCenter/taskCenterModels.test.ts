@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatMetricsDuration,
+  formatMetricsLatency,
+  formatMetricsQueueRun,
+  formatMetricsRate,
   formatRuntimeBatchFlags,
   formatRuntimeBatchItemSummary,
   formatRuntimeBatchProgress,
@@ -74,6 +78,34 @@ describe("taskCenterModels", () => {
 
   it("formats shared error and runtime copy consistently", () => {
     expect(formatTaskCenterErrorText(undefined, null)).toBe("ERROR: 未知错误");
+    expect(formatMetricsRate(0.456)).toBe("46%");
+    expect(formatMetricsRate(null)).toBe("-");
+    expect(formatMetricsDuration(850)).toBe("850ms");
+    expect(formatMetricsDuration(5_500)).toBe("5.5s");
+    expect(formatMetricsDuration(90_000)).toBe("1.5m");
+    expect(formatMetricsQueueRun({ total: 0, queued: 3, running: 2, done: 0, failed: 0 })).toBe("3/2");
+    expect(
+      formatMetricsLatency({
+        total: 0,
+        queued: 0,
+        running: 0,
+        done: 0,
+        failed: 0,
+        avg_queue_ms: 1200,
+        avg_run_ms: 4200,
+      }),
+    ).toBe("1.2s / 4.2s");
+    expect(
+      formatMetricsLatency({
+        total: 0,
+        queued: 0,
+        running: 0,
+        done: 0,
+        failed: 0,
+        avg_queue_ms: null,
+        avg_run_ms: 4200,
+      }),
+    ).toBe("4.2s");
     expect(
       formatRuntimeCheckpointSummary({ status: "paused", completed_count: 1, failed_count: 2, skipped_count: 3 }),
     ).toBe("last_checkpoint: paused | completed 1 | failed 2 | skipped 3");

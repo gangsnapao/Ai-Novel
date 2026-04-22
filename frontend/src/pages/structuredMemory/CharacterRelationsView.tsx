@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { Drawer } from "../../components/ui/Drawer";
 import { useToast } from "../../components/ui/toast";
+import {
+  analyzeGraphRelationsAiImport,
+  applyGraphRelationsAiImport,
+  type GraphRelationsAiImportPreview,
+} from "../../services/aiImportApi";
 import { ApiError, apiJson } from "../../services/apiClient";
 
 type EntityRow = {
@@ -168,6 +174,11 @@ export function CharacterRelationsView(props: {
   const [createToId, setCreateToId] = useState("");
   const [createType, setCreateType] = useState<string>("related_to");
   const [createDesc, setCreateDesc] = useState("");
+  const [aiImportOpen, setAiImportOpen] = useState(false);
+  const [aiImportText, setAiImportText] = useState("");
+  const [aiImportLoading, setAiImportLoading] = useState(false);
+  const [aiImportApplying, setAiImportApplying] = useState(false);
+  const [aiImportPreview, setAiImportPreview] = useState<GraphRelationsAiImportPreview | null>(null);
 
   useEffect(() => {
     if (!characters.length) return;
@@ -278,6 +289,52 @@ export function CharacterRelationsView(props: {
     setCreateDesc("");
   }, [createDesc, createFromId, createToId, createType, runChangeSet, toast]);
 
+  const analyzeAiImport = useCallback(async () => {
+    if (!aiImportText.trim()) {
+      toast.toastWarning("请先粘贴人物关系设定");
+      return;
+    }
+    if (aiImportLoading) return;
+    setAiImportLoading(true);
+    try {
+      const res = await analyzeGraphRelationsAiImport(projectId, aiImportText.trim());
+      setAiImportPreview(res.data.preview);
+      toast.toastSuccess("人物关系已解析");
+    } catch (e) {
+      const err =
+        e instanceof ApiError
+          ? e
+          : new ApiError({ code: "UNKNOWN", message: String(e), requestId: "unknown", status: 0 });
+      onRequestId(err.requestId ?? null);
+      toast.toastError(`${err.message} (${err.code})`, err.requestId);
+    } finally {
+      setAiImportLoading(false);
+    }
+  }, [aiImportLoading, aiImportText, onRequestId, projectId, toast]);
+
+  const applyAiImport = useCallback(async () => {
+    if (!aiImportPreview || aiImportApplying) return;
+    setAiImportApplying(true);
+    try {
+      const res = await applyGraphRelationsAiImport(projectId, aiImportPreview);
+      onRequestId(res.request_id ?? null);
+      toast.toastSuccess("人物关系已导入", res.request_id);
+      setAiImportOpen(false);
+      setAiImportText("");
+      setAiImportPreview(null);
+      await refresh();
+    } catch (e) {
+      const err =
+        e instanceof ApiError
+          ? e
+          : new ApiError({ code: "UNKNOWN", message: String(e), requestId: "unknown", status: 0 });
+      onRequestId(err.requestId ?? null);
+      toast.toastError(`${err.message} (${err.code})`, err.requestId);
+    } finally {
+      setAiImportApplying(false);
+    }
+  }, [aiImportApplying, aiImportPreview, onRequestId, projectId, refresh, toast]);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const editing = useMemo(
     () => relations.find((r) => String(r.id) === String(editingId)) ?? null,
@@ -383,6 +440,18 @@ export function CharacterRelationsView(props: {
           <div className="flex flex-wrap items-center gap-2">
             <button
               className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setAiImportOpen(true);
+                setAiImportText("");
+                setAiImportPreview(null);
+              }}
+              disabled={loading || saving || rollingBack}
+              type="button"
+            >
+              AI一键导入
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
               onClick={() => void refresh()}
               disabled={loading}
               type="button"
@@ -435,6 +504,115 @@ export function CharacterRelationsView(props: {
           </div>
         ) : null}
       </div>
+
+      <Drawer
+        open={aiImportOpen}
+        onClose={() => {
+          if (aiImportLoading || aiImportApplying) return;
+          setAiImportOpen(false);
+        }}
+        ariaLabel="人物关系 AI 一键导入"
+        panelClassName="h-full w-full max-w-2xl border-l border-border bg-canvas p-6 shadow-sm"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-content text-2xl text-ink">人物关系 AI 一键导入</div>
+            <div className="mt-1 text-xs text-subtext">粘贴人物关系说明、角色小传或阵营关系表，AI 会拆成角色实体与关系导入图谱。</div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="btn btn-secondary"
+              disabled={aiImportLoading || aiImportApplying}
+              onClick={() => setAiImportOpen(false)}
+              type="button"
+            >
+              关闭
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={!aiImportPreview || aiImportLoading || aiImportApplying}
+              onClick={() => void applyAiImport()}
+              type="button"
+            >
+              {aiImportApplying ? "导入中..." : "导入到关系图谱"}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-xs text-subtext">粘贴内容</span>
+            <textarea
+              className="textarea atelier-content"
+              rows={12}
+              value={aiImportText}
+              onChange={(e) => setAiImportText(e.target.value)}
+              placeholder="例如：林默与苏晚青梅竹马，后因误会决裂；顾沉是林默导师，同时暗中保护苏晚……"
+            />
+          </label>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="btn btn-secondary"
+              disabled={!aiImportText.trim() || aiImportLoading || aiImportApplying}
+              onClick={() => void analyzeAiImport()}
+              type="button"
+            >
+              {aiImportLoading ? "解析中..." : "开始解析"}
+            </button>
+            {aiImportPreview ? (
+              <div className="text-xs text-subtext">
+                识别到 {aiImportPreview.entities.length} 个角色实体，{aiImportPreview.relations.length} 条关系
+              </div>
+            ) : null}
+          </div>
+
+          {aiImportPreview?.summary_md ? (
+            <div className="rounded-atelier border border-border bg-surface p-3 text-sm text-subtext">
+              {aiImportPreview.summary_md}
+            </div>
+          ) : null}
+
+          {aiImportPreview ? (
+            <div className="grid gap-3">
+              <div className="rounded-atelier border border-border bg-surface p-3">
+                <div className="text-xs text-subtext">人物实体</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {aiImportPreview.entities.length === 0 ? (
+                    <span className="text-sm text-subtext">未识别到角色实体</span>
+                  ) : (
+                    aiImportPreview.entities.map((entity, idx) => (
+                      <span key={`${entity.name}-${idx}`} className="rounded border border-border px-2 py-1 text-sm text-ink">
+                        {entity.name}
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                {aiImportPreview.relations.length === 0 ? (
+                  <div className="rounded-atelier border border-border bg-surface p-3 text-sm text-subtext">
+                    未识别到明确的人物关系。
+                  </div>
+                ) : (
+                  aiImportPreview.relations.map((relation, idx) => (
+                    <div key={`${relation.from_entity_name}-${relation.to_entity_name}-${idx}`} className="rounded-atelier border border-border bg-surface p-3">
+                      <div className="text-sm text-ink">
+                        {`${relation.from_entity_name} -> ${relation.to_entity_name}`}
+                      </div>
+                      <div className="mt-1 text-xs text-subtext">关系类型：{relation.relation_type}</div>
+                      {relation.description_md ? (
+                        <div className="mt-2 text-sm text-subtext">{relation.description_md}</div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Drawer>
 
       <div className="rounded-atelier border border-border bg-canvas p-3">
         <div className="text-sm text-ink">新增关系</div>

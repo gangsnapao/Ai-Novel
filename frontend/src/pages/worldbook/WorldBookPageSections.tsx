@@ -58,6 +58,7 @@ export type WorldBookPageActionsBarProps = {
   onRefresh: () => void;
   onExport: () => void;
   onOpenImport: () => void;
+  onOpenAiImport: () => void;
   onOpenNew: () => void;
 };
 
@@ -84,6 +85,9 @@ export function WorldBookPageActionsBar(props: WorldBookPageActionsBarProps) {
         </button>
         <button className="btn btn-secondary" disabled={!props.projectId} onClick={props.onOpenImport} type="button">
           {WORLDBOOK_COPY.importJson}
+        </button>
+        <button className="btn btn-secondary" disabled={!props.projectId} onClick={props.onOpenAiImport} type="button">
+          AI一键导入
         </button>
         <button className="btn btn-primary" onClick={props.onOpenNew} type="button">
           {UI_COPY.worldbook.create}
@@ -717,6 +721,28 @@ export type WorldBookImportDrawerProps = {
   onApply: () => void;
 };
 
+export type WorldBookAiImportDrawerProps = {
+  open: boolean;
+  text: string;
+  loading: boolean;
+  applying: boolean;
+  preview: {
+    summary_md?: string | null;
+    ops: Array<{
+      op: "create" | "update" | "merge" | "dedupe";
+      match_title?: string | null;
+      entry?: { title?: string | null; keywords?: string[]; content_md?: string | null } | null;
+      canonical_title?: string | null;
+      duplicate_titles?: string[];
+      reason?: string | null;
+    }>;
+  } | null;
+  onClose: () => void;
+  onTextChange: (value: string) => void;
+  onAnalyze: () => void;
+  onApply: () => void;
+};
+
 export function WorldBookImportDrawer(props: WorldBookImportDrawerProps) {
   return (
     <Drawer
@@ -847,6 +873,103 @@ export function WorldBookImportDrawer(props: WorldBookImportDrawerProps) {
                 {JSON.stringify(props.report.actions ?? [], null, 2)}
               </pre>
             </details>
+          </div>
+        ) : null}
+      </div>
+    </Drawer>
+  );
+}
+
+export function WorldBookAiImportDrawer(props: WorldBookAiImportDrawerProps) {
+  const createCount = props.preview?.ops.filter((item) => item.op === "create").length ?? 0;
+  const updateCount = props.preview?.ops.filter((item) => item.op === "update" || item.op === "merge").length ?? 0;
+  const dedupeCount = props.preview?.ops.filter((item) => item.op === "dedupe").length ?? 0;
+
+  return (
+    <Drawer
+      open={props.open}
+      onClose={props.onClose}
+      ariaLabel="世界书 AI 一键导入"
+      panelClassName="h-full w-full max-w-2xl border-l border-border bg-canvas p-6 shadow-sm"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-content text-2xl text-ink">世界书 AI 一键导入</div>
+          <div className="mt-1 text-xs text-subtext">粘贴设定资料、世界观说明或术语表，AI 会拆成世界书条目并导入。</div>
+        </div>
+        <div className="flex gap-2">
+          <button className="btn btn-secondary" disabled={props.loading || props.applying} onClick={props.onClose} type="button">
+            {UI_COPY.worldbook.close}
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={!props.preview || props.loading || props.applying}
+            onClick={props.onApply}
+            type="button"
+          >
+            {props.applying ? "导入中..." : "导入到世界书"}
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4">
+        <label className="grid gap-1">
+          <span className="text-xs text-subtext">粘贴内容</span>
+          <textarea
+            className="textarea atelier-content"
+            rows={12}
+            value={props.text}
+            onChange={(event) => props.onTextChange(event.target.value)}
+            placeholder="例如：世界观设定、地名说明、组织介绍、规则说明、道具词条等"
+          />
+        </label>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="btn btn-secondary"
+            disabled={!props.text.trim() || props.loading || props.applying}
+            onClick={props.onAnalyze}
+            type="button"
+          >
+            {props.loading ? "解析中..." : "开始解析"}
+          </button>
+          {props.preview ? (
+            <div className="text-xs text-subtext">
+              新建 {createCount} 条，更新/合并 {updateCount} 条，去重 {dedupeCount} 条
+            </div>
+          ) : null}
+        </div>
+
+        {props.preview?.summary_md ? (
+          <div className="rounded-atelier border border-border bg-surface p-3 text-sm text-subtext">
+            {props.preview.summary_md}
+          </div>
+        ) : null}
+
+        {props.preview ? (
+          <div className="grid gap-3">
+            {props.preview.ops.length === 0 ? (
+              <div className="rounded-atelier border border-border bg-surface p-3 text-sm text-subtext">
+                AI 没有识别到可导入的世界书条目。
+              </div>
+            ) : (
+              props.preview.ops.map((op, idx) => (
+                <div key={`${op.op}-${idx}`} className="rounded-atelier border border-border bg-surface p-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-subtext">
+                    <span className="rounded border border-border px-2 py-0.5 text-ink">{op.op}</span>
+                    <span className="text-ink">{op.entry?.title || op.match_title || op.canonical_title || "未命名条目"}</span>
+                  </div>
+                  {op.entry?.keywords?.length ? (
+                    <div className="mt-2 text-xs text-subtext">关键词：{op.entry.keywords.join("、")}</div>
+                  ) : null}
+                  {op.op === "dedupe" && op.duplicate_titles?.length ? (
+                    <div className="mt-2 text-xs text-subtext">重复条目：{op.duplicate_titles.join("、")}</div>
+                  ) : null}
+                  {op.entry?.content_md ? <div className="mt-2 line-clamp-4 text-sm text-subtext">{op.entry.content_md}</div> : null}
+                  {op.reason ? <div className="mt-2 text-xs text-subtext">原因：{op.reason}</div> : null}
+                </div>
+              ))
+            )}
           </div>
         ) : null}
       </div>

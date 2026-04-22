@@ -157,6 +157,46 @@ class TestLlmContractRoutes(unittest.TestCase):
             self.assertEqual(row.provider, "openai")
             self.assertEqual(row.model, "gpt-4o-mini")
 
+    def test_profile_create_rejects_gemini_provider_with_openai_bridge_base_url(self) -> None:
+        res = self.client.post(
+            "/api/llm_profiles",
+            headers=self.headers,
+            json={
+                "name": "Broken Gemini Bridge",
+                "provider": "gemini",
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+                "model": "gemini-3-flash-preview",
+            },
+        )
+        self.assertEqual(res.status_code, 400)
+        payload = res.json()
+        self.assertEqual(payload["error"]["code"], "LLM_CONFIG_ERROR")
+        self.assertIn("OpenAI 兼容桥接地址", payload["error"]["message"])
+
+    def test_put_preset_rejects_gemini_provider_with_openai_bridge_base_url(self) -> None:
+        res = self.client.put(
+            "/api/projects/p1/llm_preset",
+            headers=self.headers,
+            json={
+                "provider": "gemini",
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+                "model": "gemini-3-flash-preview",
+                "temperature": 0.7,
+                "top_p": 1.0,
+                "max_tokens": 8192,
+                "presence_penalty": 0.0,
+                "frequency_penalty": 0.0,
+                "top_k": None,
+                "stop": [],
+                "timeout_seconds": 180,
+                "extra": {},
+            },
+        )
+        self.assertEqual(res.status_code, 400)
+        payload = res.json()
+        self.assertEqual(payload["error"]["code"], "LLM_CONFIG_ERROR")
+        self.assertIn("OpenAI 兼容桥接地址", payload["error"]["message"])
+
     def test_enforce_keeps_gateway_passthrough_for_openai_compatible(self) -> None:
         settings.llm_config_mode = "enforce"
         res = self.client.put(

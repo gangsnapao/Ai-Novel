@@ -1,10 +1,9 @@
 import clsx from "clsx";
 import { BookOpen, ChevronLeft, Edit3, List, StickyNote } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { useNavigate, useParams } from "react-router-dom";
-import remarkGfm from "remark-gfm";
 
+import { MarkdownPreview } from "../components/atelier/MarkdownPreview";
 import { WizardNextBar } from "../components/atelier/WizardNextBar";
 import { PaperContent } from "../components/layout/AppShell";
 import { ChapterVirtualList } from "../components/writing/ChapterVirtualList";
@@ -262,11 +261,11 @@ export function PreviewPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="atelier-content mx-auto max-w-4xl text-ink">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {loadingChapter ? "_(loading...)_" : activeChapter?.content_md || "_（空）_"}
-                  </ReactMarkdown>
-                </div>
+                <MarkdownPreview
+                  className="atelier-content mx-auto max-w-4xl text-ink"
+                  content={loadingChapter ? "_(loading...)_" : activeChapter?.content_md || ""}
+                  fallback={<div className="atelier-content mx-auto max-w-4xl text-subtext">加载正文中...</div>}
+                />
               </>
             ) : (
               <div className="text-subtext">暂无可预览内容</div>

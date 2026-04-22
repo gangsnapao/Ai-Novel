@@ -26,6 +26,7 @@ from app.models.prompt_preset import PromptPreset
 from app.models.story_memory import StoryMemory
 from app.models.structured_memory import MemoryEntity, MemoryEvent, MemoryEvidence, MemoryForeshadow, MemoryRelation
 from app.models.worldbook_entry import WorldBookEntry
+from app.services.character_growth_service import dump_profile_history_json, dump_text_list_json, parse_profile_history_json, parse_text_list_json
 from app.services.vector_embedding_overrides import vector_embedding_overrides
 from app.services.vector_rag_service import VectorChunk, ingest_chunks, purge_project_vectors
 
@@ -474,7 +475,20 @@ def export_project_bundle(db: Session, *, project_id: str) -> dict[str, Any]:
             }
             for ch in chapters
         ],
-        "characters": [{"id": c.id, "name": c.name, "role": c.role, "profile": c.profile, "notes": c.notes} for c in characters],
+        "characters": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "role": c.role,
+                "profile": c.profile,
+                "profile_version": int(getattr(c, "profile_version", 0) or 0),
+                "profile_history": parse_profile_history_json(getattr(c, "profile_history_json", None)),
+                "arc_stages": parse_text_list_json(getattr(c, "arc_stages_json", None)),
+                "voice_samples": parse_text_list_json(getattr(c, "voice_samples_json", None)),
+                "notes": c.notes,
+            }
+            for c in characters
+        ],
         "worldbook": {
             "schema_version": "worldbook_export_all_v1",
             "entries": [
@@ -702,9 +716,9 @@ def import_project_bundle(
         db.add(
             LLMPreset(
                 project_id=new_project_id,
-                provider=str(llm_obj.get("provider") or "openai"),
-                base_url=str(llm_obj.get("base_url") or "") or None,
-                model=str(llm_obj.get("model") or "gpt-4o-mini"),
+                provider=str(llm_obj.get("provider") or "openai_compatible"),
+                base_url=str(llm_obj.get("base_url") or "https://api.deepseek.com/v1") or None,
+                model=str(llm_obj.get("model") or "deepseek-chat"),
                 temperature=llm_obj.get("temperature"),
                 top_p=llm_obj.get("top_p"),
                 max_tokens=llm_obj.get("max_tokens"),
@@ -736,6 +750,9 @@ def import_project_bundle(
             )
         )
     report["created"]["outlines"] = len(outline_id_map)
+    if outline_id_map:
+        # Persist parent outlines before dependent chapters are inserted.
+        db.flush()
 
     chapter_id_map: dict[str, str] = {}
     chapters_in = bundle.get("chapters")
@@ -790,6 +807,10 @@ def import_project_bundle(
                 name=str(c.get("name") or "")[:255] or "角色",
                 role=str(c.get("role") or "") or None,
                 profile=str(c.get("profile") or "") or None,
+                profile_version=int(c.get("profile_version") or 0),
+                profile_history_json=dump_profile_history_json(c.get("profile_history") if isinstance(c.get("profile_history"), list) else None),
+                arc_stages_json=dump_text_list_json(c.get("arc_stages") if isinstance(c.get("arc_stages"), list) else None),
+                voice_samples_json=dump_text_list_json(c.get("voice_samples") if isinstance(c.get("voice_samples"), list) else None),
                 notes=str(c.get("notes") or "") or None,
             )
         )

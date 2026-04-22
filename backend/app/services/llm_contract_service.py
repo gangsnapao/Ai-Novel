@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from typing import Any
 
 from app.core.config import settings
@@ -70,6 +72,35 @@ def normalize_base_url_for_provider(provider: str, base_url: str | None, *, mode
         return resolve_base_url(provider, base_url, mode=active_mode).base_url
     except LLMContractLookupError as exc:
         _raise_contract_error(exc)
+
+
+def validate_provider_base_url_compatibility(provider: str, base_url: str | None) -> None:
+    provider_key = normalize_provider_model(provider, "placeholder-model")[0]
+    normalized = normalize_base_url_for_provider(provider_key, base_url)
+    if not normalized:
+        return
+
+    parsed = urlparse(normalized)
+    host = str(parsed.hostname or "").strip().lower()
+    path = str(parsed.path or "").rstrip("/")
+
+    if provider_key == "gemini" and host == "generativelanguage.googleapis.com":
+        if path.startswith("/v1beta/openai"):
+            raise AppError(
+                code="LLM_CONFIG_ERROR",
+                message="Gemini 官方 provider 不能使用 OpenAI 兼容桥接地址，请改用 openai_compatible 或官方 Gemini 地址",
+                status_code=400,
+                details={"provider": provider_key, "base_url": normalized},
+            )
+
+    if provider_key in ("openai_compatible", "openai_responses_compatible") and host == "generativelanguage.googleapis.com":
+        if path == "" or path == "/v1" or path == "/v1beta" or path.startswith("/v1beta/models") or path.startswith("/v1/models"):
+            raise AppError(
+                code="LLM_CONFIG_ERROR",
+                message="OpenAI 兼容 provider 不能使用 Gemini 官方模型目录地址，请改用 /v1beta/openai",
+                status_code=400,
+                details={"provider": provider_key, "base_url": normalized},
+            )
 
 
 def normalize_max_tokens_for_provider(

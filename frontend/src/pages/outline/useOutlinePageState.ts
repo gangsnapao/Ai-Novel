@@ -25,6 +25,7 @@ import type {
 } from "./OutlinePageSections";
 import { getOutlineCreateChaptersDescription, getOutlineCreatedChaptersText, OUTLINE_COPY } from "./outlineCopy";
 import { buildNextOutlineTitle } from "./outlineModels";
+import { deriveOutlineChaptersForSkeleton } from "./outlineSkeletonChapters";
 import { useOutlineGenerationState } from "./useOutlineGenerationState";
 
 type OutlineLoaded = {
@@ -311,14 +312,15 @@ export function useOutlinePageState(): OutlinePageState {
     toast,
   });
 
-  const storedChapters = useMemo(
-    () => deriveOutlineFromStoredContent(activeOutline?.content_md ?? "", activeOutline?.structure).chapters,
-    [activeOutline?.content_md, activeOutline?.structure],
-  );
-  const previewChapters = generation.genPreview?.chapters;
+  const previewChapters = generation.genPreview?.chapters ?? null;
   const chaptersForSkeleton = useMemo(
-    () => (previewChapters && previewChapters.length > 0 ? previewChapters : storedChapters),
-    [previewChapters, storedChapters],
+    () =>
+      deriveOutlineChaptersForSkeleton({
+        contentMd: generation.genPreview?.outline_md ?? activeOutline?.content_md ?? "",
+        structure: activeOutline?.structure,
+        previewChapters,
+      }),
+    [activeOutline?.content_md, activeOutline?.structure, generation.genPreview?.outline_md, previewChapters],
   );
   const canCreateChapters = chaptersForSkeleton.length > 0;
 

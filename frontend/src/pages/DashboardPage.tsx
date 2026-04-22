@@ -19,6 +19,43 @@ type CreateProjectForm = {
   logline: string;
 };
 
+const PROJECT_SUMMARY_CACHE_KEY = "ainovel:project-summary-cache:v3";
+
+type WizardSummary = { percent: number; nextTitle: string | null; nextHref: string | null };
+
+type WizardSummaryCachePayload = {
+  at: number;
+  wizardByProjectId: Record<string, WizardSummary>;
+};
+
+function readWizardSummaryCache(): Record<string, WizardSummary> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.sessionStorage.getItem(PROJECT_SUMMARY_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as WizardSummaryCachePayload;
+    if (!parsed || typeof parsed.at !== "number" || !parsed.wizardByProjectId || typeof parsed.wizardByProjectId !== "object") {
+      return {};
+    }
+    return parsed.wizardByProjectId;
+  } catch {
+    return {};
+  }
+}
+
+function writeWizardSummaryCache(wizardByProjectId: Record<string, WizardSummary>) {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: WizardSummaryCachePayload = {
+      at: Date.now(),
+      wizardByProjectId,
+    };
+    window.sessionStorage.setItem(PROJECT_SUMMARY_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore storage failures
+  }
+}
+
 export function DashboardPage() {
   const { projects, loading, error, refresh } = useProjects();
   const toast = useToast();
@@ -41,8 +78,7 @@ export function DashboardPage() {
     return "晚上好";
   }, []);
 
-  type WizardSummary = { percent: number; nextTitle: string | null; nextHref: string | null };
-  const [wizardByProjectId, setWizardByProjectId] = useState<Record<string, WizardSummary>>({});
+  const [wizardByProjectId, setWizardByProjectId] = useState<Record<string, WizardSummary>>(() => readWizardSummaryCache());
   const [wizardLoadingByProjectId, setWizardLoadingByProjectId] = useState<Record<string, boolean>>({});
   const recommendedWizard = recommendedProject ? wizardByProjectId[recommendedProject.id] : null;
   const recommendedWizardLoading = recommendedProject
@@ -86,6 +122,7 @@ export function DashboardPage() {
           };
         }
         setWizardByProjectId(nextWizardByProjectId);
+        writeWizardSummaryCache(nextWizardByProjectId);
       } catch {
         // ignore
       } finally {

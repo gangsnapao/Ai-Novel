@@ -6,7 +6,13 @@ from app.api.deps import DbDep, UserIdDep, require_project_editor
 from app.core.errors import ok_payload
 from app.models.llm_preset import LLMPreset
 from app.schemas.llm_preset import LLMPresetOut, LLMPresetPutRequest
-from app.services.llm_contract_service import capability_contract, normalize_base_url_for_provider, normalize_max_tokens_for_provider, normalize_provider_model
+from app.services.llm_contract_service import (
+    capability_contract,
+    normalize_base_url_for_provider,
+    normalize_max_tokens_for_provider,
+    normalize_provider_model,
+    validate_provider_base_url_compatibility,
+)
 from app.services.llm_profile_template import decode_extra_json, decode_stop_json, encode_extra_json, encode_stop_json
 
 router = APIRouter()
@@ -84,6 +90,7 @@ def put_llm_preset(
 
     provider, model = normalize_provider_model(body.provider, body.model)
     base_url = normalize_base_url_for_provider(provider, body.base_url)
+    validate_provider_base_url_compatibility(provider, base_url)
 
     row = db.get(LLMPreset, project_id)
     if row is None:

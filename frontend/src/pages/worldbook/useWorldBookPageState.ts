@@ -6,6 +6,7 @@ import { useToast } from "../../components/ui/toast";
 import { useProjectData } from "../../hooks/useProjectData";
 import { UI_COPY } from "../../lib/uiCopy";
 import type { ApiError } from "../../services/apiClient";
+import { analyzeWorldbookAiImport, applyWorldbookAiImport, type WorldbookAiImportPreview } from "../../services/aiImportApi";
 import {
   bulkDeleteWorldBookEntries,
   bulkUpdateWorldBookEntries,
@@ -34,6 +35,7 @@ import {
   WorldBookEditorDrawer,
   WorldBookEntriesSection,
   WorldBookImportDrawer,
+  WorldBookAiImportDrawer,
   WorldBookPageActionsBar,
   WorldBookPreviewPanel,
 } from "./WorldBookPageSections";
@@ -65,6 +67,7 @@ type WorldBookPageState = {
   entriesSectionProps: ComponentProps<typeof WorldBookEntriesSection>;
   pagePreviewPanelProps: ComponentProps<typeof WorldBookPreviewPanel>;
   importDrawerProps: ComponentProps<typeof WorldBookImportDrawer>;
+  aiImportDrawerProps: ComponentProps<typeof WorldBookAiImportDrawer>;
   editorDrawerProps: ComponentProps<typeof WorldBookEditorDrawer>;
 };
 
@@ -108,6 +111,11 @@ export function useWorldBookPageState(): WorldBookPageState {
   const [importJson, setImportJson] = useState<WorldBookExportAllV1 | null>(null);
   const [importReport, setImportReport] = useState<WorldBookImportAllReport | null>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [aiImportOpen, setAiImportOpen] = useState(false);
+  const [aiImportText, setAiImportText] = useState("");
+  const [aiImportLoading, setAiImportLoading] = useState(false);
+  const [aiImportApplying, setAiImportApplying] = useState(false);
+  const [aiImportPreview, setAiImportPreview] = useState<WorldbookAiImportPreview | null>(null);
 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewRequestId, setPreviewRequestId] = useState<string | null>(null);
@@ -159,10 +167,21 @@ export function useWorldBookPageState(): WorldBookPageState {
     setImportFileName("");
   }, []);
 
+  const openAiImportDrawer = useCallback(() => {
+    setAiImportOpen(true);
+    setAiImportText("");
+    setAiImportPreview(null);
+  }, []);
+
   const closeImportDrawer = useCallback(() => {
     if (importLoading) return;
     setImportOpen(false);
   }, [importLoading]);
+
+  const closeAiImportDrawer = useCallback(() => {
+    if (aiImportLoading || aiImportApplying) return;
+    setAiImportOpen(false);
+  }, [aiImportApplying, aiImportLoading]);
 
   const exportAll = useCallback(async () => {
     if (!projectId) {
@@ -255,6 +274,48 @@ export function useWorldBookPageState(): WorldBookPageState {
     },
     [confirm, entriesQuery, importJson, importLoading, importMode, projectId, toast],
   );
+
+  const analyzeAiImport = useCallback(async () => {
+    if (!projectId) {
+      toast.toastError(UI_COPY.worldbook.missingProjectId);
+      return;
+    }
+    if (!aiImportText.trim()) {
+      toast.toastError("请先粘贴要导入的世界书内容");
+      return;
+    }
+    if (aiImportLoading) return;
+    setAiImportLoading(true);
+    try {
+      const res = await analyzeWorldbookAiImport(projectId, aiImportText.trim());
+      setAiImportPreview(res.data.preview);
+      toast.toastSuccess("世界书内容已解析");
+    } catch (error) {
+      const err = error as ApiError;
+      toast.toastError(formatWorldBookActionError("世界书 AI 导入分析失败", err), err.requestId);
+    } finally {
+      setAiImportLoading(false);
+    }
+  }, [aiImportLoading, aiImportText, projectId, toast]);
+
+  const applyAiImport = useCallback(async () => {
+    if (!projectId || !aiImportPreview) return;
+    if (aiImportApplying) return;
+    setAiImportApplying(true);
+    try {
+      await applyWorldbookAiImport(projectId, aiImportPreview);
+      setAiImportOpen(false);
+      setAiImportText("");
+      setAiImportPreview(null);
+      await entriesQuery.refresh();
+      toast.toastSuccess("世界书已导入");
+    } catch (error) {
+      const err = error as ApiError;
+      toast.toastError(formatWorldBookActionError("世界书 AI 导入应用失败", err), err.requestId);
+    } finally {
+      setAiImportApplying(false);
+    }
+  }, [aiImportApplying, aiImportPreview, entriesQuery, projectId, toast]);
 
   useEffect(() => {
     if (!bulkMode) return;
@@ -695,6 +756,7 @@ export function useWorldBookPageState(): WorldBookPageState {
       onRefresh: () => void entriesQuery.refresh(),
       onExport: () => void exportAll(),
       onOpenImport: openImportDrawer,
+      onOpenAiImport: openAiImportDrawer,
       onOpenNew: openNew,
     },
     autoUpdateSectionProps: {
@@ -778,6 +840,17 @@ export function useWorldBookPageState(): WorldBookPageState {
       onModeChange: setImportMode,
       onDryRun: () => void runImport(true),
       onApply: () => void runImport(false),
+    },
+    aiImportDrawerProps: {
+      open: aiImportOpen,
+      text: aiImportText,
+      loading: aiImportLoading,
+      applying: aiImportApplying,
+      preview: aiImportPreview,
+      onClose: closeAiImportDrawer,
+      onTextChange: setAiImportText,
+      onAnalyze: () => void analyzeAiImport(),
+      onApply: () => void applyAiImport(),
     },
     editorDrawerProps: {
       open: drawerOpen,

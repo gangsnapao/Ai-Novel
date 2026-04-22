@@ -12,6 +12,7 @@ import { useWizardProgress } from "../hooks/useWizardProgress";
 import { copyText } from "../lib/copyText";
 import { duration, transition } from "../lib/motion";
 import { ApiError, apiJson } from "../services/apiClient";
+import { analyzeCharactersAiImport, applyCharactersAiImport, type CharactersAiImportPreview } from "../services/aiImportApi";
 import { markWizardProjectChanged } from "../services/wizard";
 import type { Character } from "../types";
 
@@ -19,8 +20,28 @@ type CharacterForm = {
   name: string;
   role: string;
   profile: string;
+  arc_stages_text: string;
+  voice_samples_text: string;
   notes: string;
 };
+
+function listToMultiline(value: string[] | null | undefined) {
+  return (value ?? []).map((item) => String(item ?? "").trim()).filter(Boolean).join("\n");
+}
+
+function multilineToList(value: string) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const line of value.split(/\r?\n/)) {
+    const text = line.trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
 
 export function CharactersPage() {
   const { projectId } = useParams();
@@ -57,8 +78,28 @@ export function CharactersPage() {
   const queuedSaveRef = useRef<null | { silent: boolean; close: boolean; snapshot?: CharacterForm }>(null);
   const wizardRefreshTimerRef = useRef<number | null>(null);
   const [baseline, setBaseline] = useState<CharacterForm | null>(null);
-  const [form, setForm] = useState<CharacterForm>({ name: "", role: "", profile: "", notes: "" });
+  const [form, setForm] = useState<CharacterForm>({
+    name: "",
+    role: "",
+    profile: "",
+    arc_stages_text: "",
+    voice_samples_text: "",
+    notes: "",
+  });
   const [searchText, setSearchText] = useState("");
+  const [aiImportOpen, setAiImportOpen] = useState(false);
+  const [aiImportText, setAiImportText] = useState("");
+  const [aiImportLoading, setAiImportLoading] = useState(false);
+  const [aiImportApplying, setAiImportApplying] = useState(false);
+  const [aiImportPreview, setAiImportPreview] = useState<CharactersAiImportPreview | null>(null);
+
+  const aiImportStats = useMemo(() => {
+    const ops = aiImportPreview?.ops ?? [];
+    return {
+      upserts: ops.filter((item) => item.op === "upsert").length,
+      dedupes: ops.filter((item) => item.op === "dedupe").length,
+    };
+  }, [aiImportPreview]);
 
   const filteredCharacters = useMemo(() => {
     const q = searchText.trim().toLowerCase();
@@ -76,6 +117,8 @@ export function CharactersPage() {
       form.name !== baseline.name ||
       form.role !== baseline.role ||
       form.profile !== baseline.profile ||
+      form.arc_stages_text !== baseline.arc_stages_text ||
+      form.voice_samples_text !== baseline.voice_samples_text ||
       form.notes !== baseline.notes
     );
   }, [baseline, form]);
@@ -91,10 +134,23 @@ export function CharactersPage() {
 
   const openNew = () => {
     setEditing(null);
-    const next = { name: "", role: "", profile: "", notes: "" };
+    const next = {
+      name: "",
+      role: "",
+      profile: "",
+      arc_stages_text: "",
+      voice_samples_text: "",
+      notes: "",
+    };
     setForm(next);
     setBaseline(next);
     setDrawerOpen(true);
+  };
+
+  const openAiImport = () => {
+    setAiImportOpen(true);
+    setAiImportText("");
+    setAiImportPreview(null);
   };
 
   const openEdit = (c: Character) => {
@@ -103,6 +159,8 @@ export function CharactersPage() {
       name: c.name ?? "",
       role: c.role ?? "",
       profile: c.profile ?? "",
+      arc_stages_text: listToMultiline(c.arc_stages),
+      voice_samples_text: listToMultiline(c.voice_samples),
       notes: c.notes ?? "",
     };
     setForm(next);
@@ -123,6 +181,48 @@ export function CharactersPage() {
     }
     setDrawerOpen(false);
   };
+
+  const runAiImportAnalyze = useCallback(async () => {
+    if (!projectId) return;
+    if (!aiImportText.trim()) {
+      toast.toastError("请先粘贴要导入的角色信息");
+      return;
+    }
+    if (aiImportLoading) return;
+    setAiImportLoading(true);
+    try {
+      const res = await analyzeCharactersAiImport(projectId, aiImportText.trim());
+      setAiImportPreview(res.data.preview);
+      toast.toastSuccess("角色信息已解析");
+    } catch (error) {
+      const err = error as ApiError;
+      toast.toastError(`${err.message} (${err.code})`, err.requestId);
+    } finally {
+      setAiImportLoading(false);
+    }
+  }, [aiImportLoading, aiImportText, projectId, toast]);
+
+  const applyAiImport = useCallback(async () => {
+    if (!projectId || !aiImportPreview) return;
+    if (aiImportApplying) return;
+    setAiImportApplying(true);
+    try {
+      await applyCharactersAiImport(projectId, aiImportPreview);
+      await load();
+      await refreshWizard();
+      markWizardProjectChanged(projectId);
+      bumpWizardLocal();
+      setAiImportOpen(false);
+      setAiImportPreview(null);
+      setAiImportText("");
+      toast.toastSuccess("角色已导入");
+    } catch (error) {
+      const err = error as ApiError;
+      toast.toastError(`${err.message} (${err.code})`, err.requestId);
+    } finally {
+      setAiImportApplying(false);
+    }
+  }, [aiImportApplying, aiImportPreview, bumpWizardLocal, load, projectId, refreshWizard, toast]);
 
   const saveCharacter = useCallback(
     async (opts?: { silent?: boolean; close?: boolean; snapshot?: CharacterForm }) => {
@@ -152,6 +252,8 @@ export function CharactersPage() {
                 name: snapshot.name.trim(),
                 role: snapshot.role.trim() || null,
                 profile: snapshot.profile || null,
+                arc_stages: multilineToList(snapshot.arc_stages_text),
+                voice_samples: multilineToList(snapshot.voice_samples_text),
                 notes: snapshot.notes || null,
               }),
             })
@@ -161,6 +263,8 @@ export function CharactersPage() {
                 name: snapshot.name.trim(),
                 role: snapshot.role.trim() || null,
                 profile: snapshot.profile || null,
+                arc_stages: multilineToList(snapshot.arc_stages_text),
+                voice_samples: multilineToList(snapshot.voice_samples_text),
                 notes: snapshot.notes || null,
               }),
             });
@@ -178,6 +282,8 @@ export function CharactersPage() {
           name: saved.name ?? "",
           role: saved.role ?? "",
           profile: saved.profile ?? "",
+          arc_stages_text: listToMultiline(saved.arc_stages),
+          voice_samples_text: listToMultiline(saved.voice_samples),
           notes: saved.notes ?? "",
         };
         setBaseline(nextBaseline);
@@ -186,6 +292,8 @@ export function CharactersPage() {
             prev.name === snapshot.name &&
             prev.role === snapshot.role &&
             prev.profile === snapshot.profile &&
+            prev.arc_stages_text === snapshot.arc_stages_text &&
+            prev.voice_samples_text === snapshot.voice_samples_text &&
             prev.notes === snapshot.notes
           ) {
             return nextBaseline;
@@ -225,7 +333,15 @@ export function CharactersPage() {
     onSave: async (snapshot) => {
       await saveCharacter({ silent: true, close: false, snapshot });
     },
-    deps: [editing?.id ?? "", form.name, form.role, form.profile, form.notes],
+    deps: [
+      editing?.id ?? "",
+      form.name,
+      form.role,
+      form.profile,
+      form.arc_stages_text,
+      form.voice_samples_text,
+      form.notes,
+    ],
   });
 
   return (
@@ -250,9 +366,14 @@ export function CharactersPage() {
             </button>
           ) : null}
         </div>
-        <button className="btn btn-primary" onClick={openNew} type="button">
-          新增角色
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn btn-secondary" onClick={openAiImport} type="button">
+            AI一键导入
+          </button>
+          <button className="btn btn-primary" onClick={openNew} type="button">
+            新增角色
+          </button>
+        </div>
       </div>
 
       {loading && charactersQuery.data === null ? (
@@ -381,6 +502,13 @@ export function CharactersPage() {
                 删除
               </button>
             </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-subtext">
+              {typeof c.profile_version === "number" && c.profile_version > 0 ? (
+                <span>档案 v{c.profile_version}</span>
+              ) : null}
+              {(c.arc_stages?.length ?? 0) > 0 ? <span>成长轨迹 {c.arc_stages?.length}</span> : null}
+              {(c.voice_samples?.length ?? 0) > 0 ? <span>语气样本 {c.voice_samples?.length}</span> : null}
+            </div>
             {c.profile ? <div className="mt-3 line-clamp-4 text-sm text-subtext">{c.profile}</div> : null}
           </motion.div>
         ))}
@@ -447,6 +575,54 @@ export function CharactersPage() {
             />
             <div className="text-[11px] text-subtext">用于生成时的角色一致性；可按条目写，更易复用。</div>
           </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="grid gap-1">
+              <span className="text-xs text-subtext">成长轨迹</span>
+              <textarea
+                className="textarea atelier-content"
+                name="arc_stages_text"
+                rows={6}
+                value={form.arc_stages_text}
+                onChange={(e) => setForm((v) => ({ ...v, arc_stages_text: e.target.value }))}
+                placeholder={"每行一条，例如：\n第一卷：逃亡求生\n第二卷：学会掌权"}
+              />
+              <div className="text-[11px] text-subtext">按时间顺序写，每行一个阶段，后续可直接喂给角色生成与回顾。</div>
+            </label>
+            <label className="grid gap-1">
+              <span className="text-xs text-subtext">语气样本</span>
+              <textarea
+                className="textarea atelier-content"
+                name="voice_samples_text"
+                rows={6}
+                value={form.voice_samples_text}
+                onChange={(e) => setForm((v) => ({ ...v, voice_samples_text: e.target.value }))}
+                placeholder={"每行一条，例如：\n“别急，先让我想想。”\n“你们退后，这里交给我。”"}
+              />
+              <div className="text-[11px] text-subtext">记录常用口吻、节奏和措辞，后续更容易保持人物说话一致。</div>
+            </label>
+          </div>
+          {editing ? (
+            <div className="rounded-atelier border border-border bg-surface p-3 text-xs text-subtext">
+              <div>当前档案版本：v{editing.profile_version ?? 0}</div>
+              {(editing.profile_history?.length ?? 0) > 0 ? (
+                <details className="mt-2">
+                  <summary className="cursor-pointer select-none text-ink">查看历史档案</summary>
+                  <div className="mt-2 grid gap-2">
+                    {(editing.profile_history ?? []).slice().reverse().map((item, index) => (
+                      <div key={`${item.version ?? "v"}-${index}`} className="rounded-atelier border border-border/70 bg-canvas p-2">
+                        <div className="text-[11px] text-subtext">
+                          v{item.version ?? "?"} {item.captured_at ? `· ${item.captured_at}` : ""}
+                        </div>
+                        <div className="mt-1 whitespace-pre-wrap text-xs text-ink">{item.profile}</div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ) : (
+                <div className="mt-1">尚无历史档案，后续每次修改人物档案都会自动留痕。</div>
+              )}
+            </div>
+          ) : null}
           <label className="grid gap-1">
             <span className="text-xs text-subtext">备注</span>
             <textarea
@@ -459,6 +635,107 @@ export function CharactersPage() {
             />
             <div className="text-[11px] text-subtext">记录未定稿/待补充信息，避免混进人物档案造成误导。</div>
           </label>
+        </div>
+      </Drawer>
+
+      <Drawer
+        open={aiImportOpen}
+        onClose={() => {
+          if (aiImportLoading || aiImportApplying) return;
+          setAiImportOpen(false);
+        }}
+        panelClassName="h-full w-full max-w-2xl border-l border-border bg-canvas p-6 shadow-sm"
+        ariaLabel="角色 AI 一键导入"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-content text-2xl text-ink">角色 AI 一键导入</div>
+            <div className="mt-1 text-xs text-subtext">粘贴人物设定、角色表或剧情片段，AI 会整理成角色卡导入现有列表。</div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="btn btn-secondary"
+              disabled={aiImportLoading || aiImportApplying}
+              onClick={() => setAiImportOpen(false)}
+              type="button"
+            >
+              关闭
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={!aiImportPreview || aiImportLoading || aiImportApplying}
+              onClick={() => void applyAiImport()}
+              type="button"
+            >
+              {aiImportApplying ? "导入中..." : "导入到角色卡"}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-xs text-subtext">粘贴内容</span>
+            <textarea
+              className="textarea atelier-content"
+              rows={12}
+              value={aiImportText}
+              onChange={(e) => setAiImportText(e.target.value)}
+              placeholder="例如：角色名单、人物设定、人物小传、章节片段等"
+            />
+          </label>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="btn btn-secondary"
+              disabled={!aiImportText.trim() || aiImportLoading || aiImportApplying}
+              onClick={() => void runAiImportAnalyze()}
+              type="button"
+            >
+              {aiImportLoading ? "解析中..." : "开始解析"}
+            </button>
+            {aiImportPreview ? (
+              <div className="text-xs text-subtext">
+                识别到 {aiImportStats.upserts} 条角色更新，{aiImportStats.dedupes} 条去重建议
+              </div>
+            ) : null}
+          </div>
+
+          {aiImportPreview?.summary_md ? (
+            <div className="rounded-atelier border border-border bg-surface p-3 text-sm text-subtext">
+              {aiImportPreview.summary_md}
+            </div>
+          ) : null}
+
+          {aiImportPreview ? (
+            <div className="grid gap-3">
+              {(aiImportPreview.ops ?? []).length === 0 ? (
+                <div className="rounded-atelier border border-border bg-surface p-3 text-sm text-subtext">
+                  AI 没有识别到可导入的角色信息。
+                </div>
+              ) : (
+                (aiImportPreview.ops ?? []).map((op, idx) => (
+                  <div key={`${op.op}-${idx}`} className="rounded-atelier border border-border bg-surface p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-subtext">
+                      <span className="rounded border border-border px-2 py-0.5 text-ink">{op.op}</span>
+                      {op.op === "upsert" ? <span>{op.name || "未命名角色"}</span> : null}
+                      {op.op === "dedupe" ? <span>{op.canonical_name || "未指定主名称"}</span> : null}
+                    </div>
+                    {op.op === "upsert" ? (
+                      <div className="mt-2 grid gap-2 text-sm text-subtext">
+                        {op.patch?.role ? <div>定位：{op.patch.role}</div> : null}
+                        {op.patch?.profile ? <div className="line-clamp-4">{op.patch.profile}</div> : null}
+                        {op.patch?.notes ? <div className="line-clamp-3 text-xs">{op.patch.notes}</div> : null}
+                      </div>
+                    ) : null}
+                    {op.op === "dedupe" && op.duplicate_names?.length ? (
+                      <div className="mt-2 text-sm text-subtext">合并重复名：{op.duplicate_names.join("、")}</div>
+                    ) : null}
+                    {op.reason ? <div className="mt-2 text-xs text-subtext">原因：{op.reason}</div> : null}
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
         </div>
       </Drawer>
 

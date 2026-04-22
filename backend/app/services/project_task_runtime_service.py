@@ -15,6 +15,7 @@ from app.db.datetime_compat import coerce_utc_datetime
 from app.db.session import SessionLocal
 from app.db.utils import utc_now
 from app.models.project_task import ProjectTask
+from app.services.project_task_error_utils import compact_json_dumps, derive_user_visible_errors
 from app.services.project_task_event_service import append_project_task_event
 from app.services.task_queue import get_task_queue, project_task_queue_has_task
 
@@ -150,6 +151,15 @@ def reconcile_project_tasks_once(*, reason: str, now=None) -> dict[str, int]:
                         "last_heartbeat_at": reference.isoformat().replace("+00:00", "Z"),
                     },
                 }
+            )
+            task.user_visible_errors_json = compact_json_dumps(
+                derive_user_visible_errors(
+                    {
+                        "error_type": "ProjectTaskWatchdog",
+                        "code": "PROJECT_TASK_HEARTBEAT_TIMEOUT",
+                        "message": "ProjectTask heartbeat timed out and was failed by watchdog",
+                    }
+                )
             )
             append_project_task_event(
                 db,

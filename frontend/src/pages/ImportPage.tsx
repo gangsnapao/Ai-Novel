@@ -16,6 +16,27 @@ type ImportDocumentDetail = {
   story_memory_proposal: unknown;
 };
 
+type OneClickApplyResult = {
+  summary_md?: string | null;
+  warnings?: string[];
+  applied?: {
+    worldbook?: { created?: number; updated?: number; skipped?: number } | null;
+    story_memory?: { created?: number; skipped?: number } | null;
+    characters?:
+      | { created?: number; updated?: number; deduped?: number; deleted?: number; skipped?: unknown[] }
+      | null;
+    graph?:
+      | {
+          created_entities?: number;
+          updated_entities?: number;
+          created_relations?: number;
+          updated_relations?: number;
+          skipped?: number;
+        }
+      | null;
+  };
+};
+
 type ImportChunk = {
   id: string;
   chunk_index: number;
@@ -46,6 +67,32 @@ function safeStringify(value: unknown): string {
   }
 }
 
+function buildOneClickSummary(result: OneClickApplyResult | null): string[] {
+  if (!result?.applied) return [];
+  const lines: string[] = [];
+  const { worldbook, story_memory: storyMemory, characters, graph } = result.applied;
+
+  if (worldbook) {
+    lines.push(
+      `世界书：新增 ${worldbook.created ?? 0}，更新 ${worldbook.updated ?? 0}，跳过 ${worldbook.skipped ?? 0}`,
+    );
+  }
+  if (storyMemory) {
+    lines.push(`故事记忆：新增 ${storyMemory.created ?? 0}，跳过 ${storyMemory.skipped ?? 0}`);
+  }
+  if (characters) {
+    lines.push(
+      `角色卡：新增 ${characters.created ?? 0}，更新 ${characters.updated ?? 0}，去重 ${characters.deduped ?? 0}`,
+    );
+  }
+  if (graph) {
+    lines.push(
+      `图谱：实体新增 ${graph.created_entities ?? 0} / 更新 ${graph.updated_entities ?? 0}，关系新增 ${graph.created_relations ?? 0} / 更新 ${graph.updated_relations ?? 0}`,
+    );
+  }
+  return lines;
+}
+
 export function ImportPage() {
   const { projectId } = useParams();
   const [searchParams] = useSearchParams();
@@ -66,6 +113,9 @@ export function ImportPage() {
 
   const [applyWorldbookLoading, setApplyWorldbookLoading] = useState(false);
   const [applyStoryMemoryLoading, setApplyStoryMemoryLoading] = useState(false);
+  const [oneClickApplying, setOneClickApplying] = useState(false);
+  const [importRequirements, setImportRequirements] = useState("");
+  const [oneClickResult, setOneClickResult] = useState<OneClickApplyResult | null>(null);
 
   const [pollPaused, setPollPaused] = useState(false);
 
@@ -148,6 +198,7 @@ export function ImportPage() {
     if (!detail) return "请先选择一条导入记录。";
     return getImportProposalDisabledReason(statusDoc?.status ?? detail.document.status);
   }, [detail, statusDoc?.status]);
+  const oneClickSummaryLines = useMemo(() => buildOneClickSummary(oneClickResult), [oneClickResult]);
 
   useEffect(() => {
     const listGuard = listGuardRef.current;
@@ -188,6 +239,7 @@ export function ImportPage() {
       setPollPaused(false);
       setSelectedId(id);
       setChunks([]);
+      setOneClickResult(null);
       setDetail(null);
       setDetailLoading(true);
       try {
@@ -297,6 +349,40 @@ export function ImportPage() {
     }
   }, [creating, file, loadList, projectId, selectDocAndLoad, toast]);
 
+  const applyOneClick = useCallback(async () => {
+    if (!projectId) return;
+    if (!detail) return;
+    if (oneClickApplying) return;
+    setOneClickApplying(true);
+    try {
+      const res = await apiJson<OneClickApplyResult & { ok: true }>(
+        `/api/projects/${projectId}/imports/${encodeURIComponent(detail.document.id)}/one_click_apply`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            requirements: importRequirements.trim() || null,
+            apply_worldbook: true,
+            apply_story_memory: true,
+            apply_characters: true,
+            apply_graph: true,
+          }),
+          timeoutMs: 300_000,
+        },
+      );
+      setOneClickResult(res.data);
+      toast.toastSuccess("已完成一键整理并入库", res.request_id);
+      await loadList();
+    } catch (e) {
+      const err =
+        e instanceof ApiError
+          ? e
+          : new ApiError({ code: "UNKNOWN", message: String(e), requestId: "unknown", status: 0 });
+      toast.toastError(`${err.message} (${err.code})`, err.requestId);
+    } finally {
+      setOneClickApplying(false);
+    }
+  }, [detail, importRequirements, loadList, oneClickApplying, projectId, toast]);
+
   const applyWorldbook = useCallback(async () => {
     if (!projectId) return;
     if (!detail) return;
@@ -380,17 +466,18 @@ export function ImportPage() {
       title="导入小说/资料"
       description={
         <div className="grid gap-2">
-          <div>流程：上传 txt/md → 后端切分 chunk →（可选）写入向量 KB → 生成提案（proposal）。</div>
+          <div>流程：上传 txt/md → 后端切分 chunk →（可选）写入向量 KB → 生成提案，或一键整理并写入角色卡、世界书、记忆与关系图谱。</div>
           <ul className="grid list-disc gap-1 pl-5 text-xs text-subtext">
             <li>
               世界书（worldbook）：会生成 WorldBookEntry
               的候选条目；应用后可在「世界书」页查看，也可在写作时用于上下文注入。
             </li>
             <li>故事记忆（story_memory）：会生成 StoryMemory 的候选条目；应用后可在记忆预览/检索中命中。</li>
+            <li>角色卡 / 图谱：一键整理会尝试把人物设定和实体关系直接补进角色卡与结构化关系数据。</li>
             <li>向量 KB（vector_kb / kb）：用于 RAG 语义检索（可在「RAG」页管理）。</li>
             <li>Chunk（chunk）：系统切分后的文本片段（用于检索与溯源）。</li>
           </ul>
-          <div className="callout-warning">提示：导入后请先预览，再选择性应用（默认不会自动写入长期记忆）。</div>
+          <div className="callout-warning">提示：你可以继续手动预览后分别应用，也可以填写导入要求后直接一键整理并入库。</div>
         </div>
       }
       actions={
@@ -567,6 +654,55 @@ export function ImportPage() {
                 </div>
 
                 <div className="grid gap-2">
+                  <div className="text-xs text-subtext">导入要求（可选）</div>
+                  <textarea
+                    aria-label="import_requirements"
+                    className="textarea min-h-[140px]"
+                    onChange={(e) => setImportRequirements(e.target.value)}
+                    placeholder="例如：优先提取人物与阵营；角色卡尽量完整；世界书按地点/组织/禁忌分类；关系图保留明确敌友与从属关系。"
+                    value={importRequirements}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      className="btn btn-primary"
+                      disabled={oneClickApplying || Boolean(proposalDisabledReason)}
+                      onClick={() => void applyOneClick()}
+                      type="button"
+                    >
+                      {oneClickApplying ? "整理中…" : "一键整理并入库"}
+                    </button>
+                    {oneClickApplying ? <GhostwriterIndicator label="AI 正在分析导入内容并写入结构化数据…" /> : null}
+                  </div>
+                  <div className={proposalDisabledReason ? "text-xs text-warning" : "text-xs text-subtext"}>
+                    {proposalDisabledReason ??
+                      "会按你的要求自动补充角色卡、世界书、故事记忆和关系图谱；建议先写清提取重点与填写规则。"}
+                  </div>
+                </div>
+
+                {oneClickResult ? (
+                  <div className="grid gap-2 rounded-atelier border border-border bg-surface p-3">
+                    <div className="text-xs text-subtext">一键整理结果</div>
+                    {oneClickResult.summary_md ? (
+                      <div className="whitespace-pre-wrap text-sm text-ink">{oneClickResult.summary_md}</div>
+                    ) : (
+                      <div className="text-sm text-subtext">本次整理未返回摘要，已按结果直接入库。</div>
+                    )}
+                    {oneClickSummaryLines.length ? (
+                      <div className="grid gap-1 text-xs text-subtext">
+                        {oneClickSummaryLines.map((line) => (
+                          <div key={line}>{line}</div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {oneClickResult.warnings?.length ? (
+                      <div className="rounded-atelier border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
+                        警告：{oneClickResult.warnings.join("、")}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <div className="grid gap-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       className="btn btn-primary"
@@ -587,7 +723,7 @@ export function ImportPage() {
                   </div>
                   <div className={proposalDisabledReason ? "text-xs text-warning" : "text-xs text-subtext"}>
                     {proposalDisabledReason ??
-                      "导入已完成，可将提案写入 WorldBook 或 story_memory；写入后可在对应页面继续编辑与检索。"}
+                      "导入已完成，也可以继续只把提案写入 WorldBook 或 story_memory；写入后可在对应页面继续编辑与检索。"}
                   </div>
                 </div>
 

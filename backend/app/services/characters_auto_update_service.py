@@ -24,6 +24,7 @@ from app.schemas.characters_auto_update import (
     CharactersAutoUpdateV1Request,
     CharacterPatchV1,
 )
+from app.services.character_growth_service import apply_profile_update
 from app.services.generation_service import prepare_llm_call
 from app.services.json_repair_service import repair_json_once
 from app.services.llm_key_resolver import resolve_api_key_for_project
@@ -232,8 +233,14 @@ def apply_characters_auto_update_ops(
                     project_id=pid,
                     name=name,
                     role=(patch.role.strip() if isinstance(patch.role, str) and patch.role.strip() else None),
-                    profile=(patch.profile.strip() if isinstance(patch.profile, str) and patch.profile.strip() else None),
+                    profile=None,
+                    profile_version=0,
+                    profile_history_json=None,
                     notes=(patch.notes.strip() if isinstance(patch.notes, str) and patch.notes.strip() else None),
+                )
+                apply_profile_update(
+                    row=row,
+                    next_profile=(patch.profile.strip() if isinstance(patch.profile, str) and patch.profile.strip() else None),
                 )
                 db.add(row)
                 by_name[key] = row
@@ -244,7 +251,10 @@ def apply_characters_auto_update_ops(
             if role_new and not (str(getattr(row, "role", "") or "").strip()):
                 row.role = role_new
 
-            row.profile = _merge_text(getattr(row, "profile", None), patch.profile, op.merge_mode_profile)
+            apply_profile_update(
+                row=row,
+                next_profile=_merge_text(getattr(row, "profile", None), patch.profile, op.merge_mode_profile),
+            )
             row.notes = _merge_text(getattr(row, "notes", None), patch.notes, op.merge_mode_notes)
             updated += 1
             continue
@@ -271,7 +281,14 @@ def apply_characters_auto_update_ops(
                     continue
 
                 canonical_row.role = str(getattr(canonical_row, "role", "") or "").strip() or str(getattr(dup_row, "role", "") or "").strip() or None
-                canonical_row.profile = _merge_text(getattr(canonical_row, "profile", None), getattr(dup_row, "profile", None), "append_missing")
+                apply_profile_update(
+                    row=canonical_row,
+                    next_profile=_merge_text(
+                        getattr(canonical_row, "profile", None),
+                        getattr(dup_row, "profile", None),
+                        "append_missing",
+                    ),
+                )
                 canonical_row.notes = _merge_text(getattr(canonical_row, "notes", None), getattr(dup_row, "notes", None), "append_missing")
 
                 db.delete(dup_row)
@@ -298,7 +315,14 @@ def apply_characters_auto_update_ops(
         canonical_row = group[0]
         for dup_row in group[1:]:
             canonical_row.role = str(getattr(canonical_row, "role", "") or "").strip() or str(getattr(dup_row, "role", "") or "").strip() or None
-            canonical_row.profile = _merge_text(getattr(canonical_row, "profile", None), getattr(dup_row, "profile", None), "append_missing")
+            apply_profile_update(
+                row=canonical_row,
+                next_profile=_merge_text(
+                    getattr(canonical_row, "profile", None),
+                    getattr(dup_row, "profile", None),
+                    "append_missing",
+                ),
+            )
             canonical_row.notes = _merge_text(getattr(canonical_row, "notes", None), getattr(dup_row, "notes", None), "append_missing")
             db.delete(dup_row)
             deleted += 1

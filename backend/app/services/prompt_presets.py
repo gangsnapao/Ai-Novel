@@ -28,14 +28,24 @@ LEGACY_IMPORTED_SCOPE = "legacy_imported"
 DEFAULT_PLAN_PRESET_NAME = "Default plan_chapter v1"
 DEFAULT_POST_EDIT_PRESET_NAME = "Default post_edit v1"
 DEFAULT_CONTENT_OPTIMIZE_PRESET_NAME = "Default content_optimize v1"
-DEFAULT_OUTLINE_PRESET_NAME = "榛樿路澶х翰鐢熸垚 v3锛堟帹鑽愶級"
-DEFAULT_CHAPTER_PRESET_NAME = "榛樿路绔犺妭鐢熸垚 v3锛堟帹鑽愶級"
-DEFAULT_CHAPTER_ANALYZE_PRESET_NAME = "榛樿路绔犺妭鍒嗘瀽 v1锛堟帹鑽愶級"
-DEFAULT_CHAPTER_REWRITE_PRESET_NAME = "榛樿路绔犺妭閲嶅啓 v1锛堟帹鑽愶級"
+DEFAULT_OUTLINE_PRESET_NAME = "默认·大纲生成 v3（推荐）"
+DEFAULT_CHAPTER_PRESET_NAME = "默认·章节生成 v4（推荐）"
+DEFAULT_CHAPTER_ANALYZE_PRESET_NAME = "默认·章节分析 v1（推荐）"
+DEFAULT_CHAPTER_REWRITE_PRESET_NAME = "默认·章节重写 v1（推荐）"
 
 _PROMPT_BLOCK_RENDER_CACHE_MAX_ENTRIES = 512
 _prompt_block_render_cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
 _prompt_block_render_cache_lock = Lock()
+
+_PROMPT_PRESET_MOJIBAKE_FIXUPS: dict[str, str] = {
+    "姝ｆ枃浼樺寲": "正文优化",
+    "娑﹁壊": "润色",
+    "榛樿路澶х翰鐢熸垚 v3锛堟帹鑽愶級": "默认·大纲生成 v3（推荐）",
+    "榛樿路绔犺妭鐢熸垚 v3锛堟帹鑽愶級": "默认·章节生成 v3（推荐）",
+    "榛樿路绔犺妭鐢熸垚 v4锛堟帹鑽愶級": "默认·章节生成 v4（推荐）",
+    "榛樿路绔犺妭鍒嗘瀽 v1锛堟帹鑽愶級": "默认·章节分析 v1（推荐）",
+    "榛樿路绔犺妭閲嶅啓 v1锛堟帹鑽愶級": "默认·章节重写 v1（推荐）",
+}
 
 
 def _hash_json(value: Any) -> str | None:
@@ -101,6 +111,15 @@ def parse_json_dict(raw: str | None) -> dict:
     return {}
 
 
+def _normalize_prompt_preset_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return _PROMPT_PRESET_MOJIBAKE_FIXUPS.get(text, text)
+
+
 def _prompt_block_from_resource(preset_id: str, block_resource: Any) -> PromptBlock:
     triggers_json = json.dumps(list(block_resource.triggers or []), ensure_ascii=False)
     budget_json = json.dumps(block_resource.budget, ensure_ascii=False) if block_resource.budget else None
@@ -151,8 +170,28 @@ def _ensure_default_preset_from_resource(
             preset.resource_key = resource_key
             changed = True
 
-        if not preset.category and resource.category:
-            preset.category = resource.category
+        normalized_name = _normalize_prompt_preset_text(preset.name)
+        if normalized_name and normalized_name != str(preset.name or "").strip():
+            preset.name = normalized_name
+            changed = True
+
+        normalized_category = _normalize_prompt_preset_text(preset.category)
+        if normalized_category != preset.category:
+            preset.category = normalized_category
+            changed = True
+
+        resource_name = _normalize_prompt_preset_text(resource.name)
+        if resource_name and str(preset.name or "").strip() != resource_name:
+            preset.name = resource_name
+            changed = True
+
+        resource_category = _normalize_prompt_preset_text(resource.category)
+        if resource_category != preset.category:
+            preset.category = resource_category
+            changed = True
+
+        if str(preset.scope or "").strip() != str(resource.scope or "").strip():
+            preset.scope = resource.scope
             changed = True
 
         if activate and resource.activation_tasks:
@@ -189,9 +228,9 @@ def _ensure_default_preset_from_resource(
     preset = PromptPreset(
         id=new_id(),
         project_id=project_id,
-        name=resource.name,
+        name=_normalize_prompt_preset_text(resource.name) or resource.name,
         resource_key=resource_key,
-        category=resource.category,
+        category=_normalize_prompt_preset_text(resource.category),
         scope=resource.scope,
         version=resource.version,
         active_for_json=json.dumps(resource.activation_tasks if activate else [], ensure_ascii=False),
@@ -269,7 +308,9 @@ def resolve_resource_key_for_preset(db: Session, *, preset: PromptPreset) -> str
             resource = load_preset_resource(key)
         except Exception:
             continue
-        if resource.name == name:
+        normalized_name = _normalize_prompt_preset_text(name)
+        resource_name = _normalize_prompt_preset_text(resource.name)
+        if resource_name == normalized_name:
             preset.resource_key = key
             return key
     return None
@@ -890,4 +931,3 @@ def render_preset_for_task(
     }
 
     return system, user, messages, sorted(all_missing), rendered_blocks, preset.id, render_log
-

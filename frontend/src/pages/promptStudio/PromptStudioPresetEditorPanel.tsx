@@ -56,7 +56,7 @@ function HighlightedTemplateTextarea(props: { value: string; disabled: boolean; 
           disabled ? "opacity-60" : null,
         )}
       >
-        <div ref={overlayContentRef} className="whitespace-pre-wrap break-words font-mono text-ink">
+        <div ref={overlayContentRef} className="whitespace-pre-wrap break-words atelier-mono text-ink">
           {highlighted}
         </div>
       </div>
